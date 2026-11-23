@@ -104,6 +104,7 @@ kbd { min-width: 21px; padding: 2px 5px; border: 1px solid var(--line); border-r
 .receipt-heading p { max-width: 620px; line-height: 1.5; }
 .receipt-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-bottom: 14px; }
 .receipt-file-button { width: 100%; cursor: pointer; }
+.receipt-file-button.is-disabled { opacity: .55; cursor: wait; pointer-events: none; }
 .receipt-manual-button { width: 100%; margin: 0 0 13px; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; clip-path: inset(50%); }
 .receipt-editor { display: grid; gap: 12px; margin: 0 0 14px; }
@@ -139,6 +140,7 @@ kbd { min-width: 21px; padding: 2px 5px; border: 1px solid var(--line); border-r
 .receipt-import-button, .receipt-clear-button { width: 100%; margin: 0 0 9px; }
 .receipt-import-result { display: grid; gap: 10px; padding: 13px; border: 1px solid var(--line); border-radius: 12px; background: var(--accent-soft); font-size: 12px; }
 .receipt-import-result .button { width: 100%; }
+.receipt-undo-note { margin: 0; color: var(--muted); line-height: 1.45; }
 main[data-mobile-view="receipts"] .hero,
 main[data-mobile-view="receipts"] .summary,
 main[data-mobile-view="receipts"] .locations-panel,

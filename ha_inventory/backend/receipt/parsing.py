@@ -36,6 +36,14 @@ _STANDALONE_MULTIPLIER = re.compile(
     r"^\s*(\d{1,3})\s*[x×]\s*\d{1,5}[,.]\d{2}(?:\s+\d{1,5}[,.]\d{2})?\s*$",
     re.IGNORECASE,
 )
+_STANDALONE_MULTIPLIER_HEAD = re.compile(r"^\s*(\d{1,3})\s*[x×*]\s*$", re.IGNORECASE)
+_STANDALONE_COUNT = re.compile(
+    r"^\s*(\d{1,3})\s*(?:STK|STÜCK|STUECK|PCS)\.?\s*$", re.IGNORECASE,
+)
+_ADJUSTMENT = re.compile(
+    r"^\s*(?:(?:PFAND|LEERGUT|EINWEG|MEHRWEG|RABATT|GUTSCHEIN|COUPON|PAYBACK)\b|-)",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -74,24 +82,44 @@ def parse_receipt(lines: list[OCRLine]) -> ParsedReceipt:
 
     parsed: list[dict] = []
     ignored = 0
-    last_unpriced_index: int | None = None
+    pending_product_index: int | None = None
+    pending_product_interrupted = False
     for index, ocr_line in enumerate(lines, start=1):
         raw = re.sub(r"\s+", " ", ocr_line.text).strip()
         if not raw:
             ignored += 1
             continue
         if _EXCLUDED.search(raw) or raw.startswith("-") or re.fullmatch(r"[\d\s.,€]+", raw):
+            if pending_product_index is not None and _ADJUSTMENT.match(raw):
+                # Stores sometimes place a discount or deposit between a product
+                # and its split multiplier row. Keep the possible association,
+                # but force the user to review it.
+                pending_product_interrupted = True
+            elif pending_product_index is not None and re.fullmatch(r"[\d\s.,€]+", raw):
+                # A standalone price row can belong to a split layout. Its
+                # presence makes a later multiplier association less certain.
+                pending_product_interrupted = True
+            else:
+                pending_product_index = None
+                pending_product_interrupted = False
             ignored += 1
-            last_unpriced_index = None
             continue
         multiplier = _STANDALONE_MULTIPLIER.match(raw)
-        if multiplier and last_unpriced_index is not None:
-            quantity = int(multiplier.group(1))
+        standalone_head = _STANDALONE_MULTIPLIER_HEAD.match(raw)
+        standalone_count = _STANDALONE_COUNT.match(raw)
+        if (multiplier or standalone_head or standalone_count) and pending_product_index is not None:
+            marker = multiplier or standalone_head or standalone_count
+            quantity = int(marker.group(1))
             if 1 <= quantity <= 999:
-                parsed[last_unpriced_index]["quantity"] = quantity
-                parsed[last_unpriced_index]["quantity_source"] = "multiplier"
-                parsed[last_unpriced_index]["requires_review"] = ocr_line.confidence < 0.55
-                last_unpriced_index = None
+                product = parsed[pending_product_index]
+                product["quantity"] = quantity
+                product["quantity_source"] = "count" if standalone_count else "multiplier"
+                product["requires_review"] = (
+                    product["confidence"] < 0.65 or pending_product_interrupted
+                    or standalone_head is not None or ocr_line.confidence < 0.72
+                )
+                pending_product_index = None
+                pending_product_interrupted = False
                 ignored += 1
                 continue
 
@@ -124,7 +152,8 @@ def parse_receipt(lines: list[OCRLine]) -> ParsedReceipt:
         normalized = normalize_text(label)
         if len(normalized) < 3 or not re.search(r"[a-zäöüß]{2}", label, re.IGNORECASE):
             ignored += 1
-            last_unpriced_index = None
+            pending_product_index = None
+            pending_product_interrupted = False
             continue
 
         has_price = bool(_MONEY.search(raw))
@@ -148,7 +177,10 @@ def parse_receipt(lines: list[OCRLine]) -> ParsedReceipt:
             "match_source": "none",
             "candidates": [],
         })
-        last_unpriced_index = len(parsed) - 1 if not has_price else None
+        # A following REWE/Kaufland continuation row may carry the multiplier
+        # even when this product row already includes its single-item price.
+        pending_product_index = len(parsed) - 1
+        pending_product_interrupted = False
 
     # Merge repeated physical lines only when their normalized label matches.
     # The preview retains their source line IDs so the consolidation is auditable.

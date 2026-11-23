@@ -1,4 +1,66 @@
 export const MAX_RECEIPT_UPLOAD_BYTES = 6 * 1024 * 1024;
+export const RECEIPT_UNDO_CONFIRM_MESSAGE = 'Alle Bestandsbuchungen dieses Kassenbons gemeinsam rückgängig machen? Neu angelegte Artikel bleiben mit unbekanntem Bestand bestehen; gelernte Produktzuordnungen bleiben erhalten. Das Undo wird vollständig abgelehnt, wenn eine Gegenbuchung unsicher wäre.';
+
+export function receiptQuantityFieldValue(quantity) {
+  return Number.isSafeInteger(quantity) && quantity > 0 && quantity <= 999
+    ? String(quantity)
+    : '';
+}
+
+export function parseReceiptQuantity(value) {
+  const text = String(value ?? '').trim();
+  if (!text) throw new Error('Gib für jede ausgewählte Position eine Menge ein.');
+  const quantity = Number(text);
+  if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > 999) {
+    throw new Error('Die Menge muss eine ganze Zahl zwischen 1 und 999 sein.');
+  }
+  return quantity;
+}
+
+export function isReceiptQuantityValid(value) {
+  try {
+    parseReceiptQuantity(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function createReceiptRecognitionGuard(AbortControllerImpl = globalThis.AbortController) {
+  let generation = 0;
+  let activeController;
+  return {
+    begin() {
+      activeController?.abort();
+      activeController = new AbortControllerImpl();
+      generation += 1;
+      return { generation, signal: activeController.signal };
+    },
+    cancel() {
+      generation += 1;
+      activeController?.abort();
+      activeController = undefined;
+    },
+    isCurrent(ticket) {
+      return Boolean(ticket && ticket.generation === generation && !ticket.signal.aborted);
+    },
+  };
+}
+
+export async function prepareAndRecognizeReceipt(guard, ticket, file, {
+  imageOptions, prepare, send,
+}) {
+  try {
+    const image = await prepare(file, imageOptions);
+    if (!guard.isCurrent(ticket)) return { stale: true };
+    const result = await send(image, ticket.signal);
+    if (!guard.isCurrent(ticket)) return { stale: true };
+    return { stale: false, result };
+  } catch (error) {
+    if (!guard.isCurrent(ticket)) return { stale: true };
+    throw error;
+  }
+}
 
 export function buildReceiptImportPayload(receipt, decisions, {
   idempotencyKey, confirmed = false, allowDuplicate = false,

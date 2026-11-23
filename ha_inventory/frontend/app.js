@@ -4,7 +4,11 @@ import { groupByLocation, filterItems, MOBILE_VIEWS } from './mobile-navigation.
 import { startZXingScanner } from './zxing-scanner.mjs';
 import { BrowserMultiFormatReader } from './vendor/zxing-browser.mjs';
 import { createApiClient } from './api-client.mjs';
-import { buildReceiptImportPayload, compressReceiptImage, createReceiptIdempotencyKey } from './receipt-flow.mjs';
+import {
+  buildReceiptImportPayload, compressReceiptImage, createReceiptIdempotencyKey,
+  createReceiptRecognitionGuard, isReceiptQuantityValid, parseReceiptQuantity,
+  prepareAndRecognizeReceipt, receiptQuantityFieldValue, RECEIPT_UNDO_CONFIRM_MESSAGE,
+} from './receipt-flow.mjs';
 import { productPrefillValues } from './product-prefill.mjs';
 import {
   bookingForScan, buildMovementPayload, createMovementIntentStore, createScanDeduplicator,
@@ -51,6 +55,7 @@ let receiptUndoIntentKey;
 let receiptRecognizing = false;
 let receiptImporting = false;
 let receiptUndoing = false;
+const receiptRecognitionGuard = createReceiptRecognitionGuard();
 const duplicateScan = createScanDeduplicator(1200);
 const movementIntents = createMovementIntentStore();
 const scanRequestGuard = createScanRequestGuard();
@@ -746,6 +751,13 @@ function receiptStatus(message, isError = false) {
 
 function chooseReceiptPhoto(file) {
   if (!file) return;
+  if (receiptImporting || receiptUndoing) {
+    receiptStatus('Der Import oder das Rückgängigmachen läuft. Bitte warte, bis der Vorgang abgeschlossen ist, bevor du das Foto wechselst.', true);
+    return;
+  }
+  receiptRecognitionGuard.cancel();
+  receiptRecognizing = false;
+  $('#receipt-recognize').disabled = false;
   if (receiptObjectUrl) URL.revokeObjectURL(receiptObjectUrl);
   receiptFile = file;
   receiptDraft = undefined;
@@ -801,7 +813,7 @@ function renderReceiptLines(receipt) {
           <select class="receipt-tracking-mode"><option value="" selected disabled>Bitte ausdrücklich auswählen</option><option value="inventory">Geschätzter Bestand</option><option value="exact">Exakter Bestand</option></select>
         </label>
       </div>
-      <label class="field">Menge <input class="receipt-quantity" type="number" min="1" max="999" step="1" inputmode="numeric" value="${line.quantity ?? 1}" /></label>
+      <label class="field">Menge <input class="receipt-quantity" type="number" min="1" max="999" step="1" inputmode="numeric" required value="${receiptQuantityFieldValue(line.quantity)}" ${line.quantity == null ? 'placeholder="Menge bitte prüfen und eingeben"' : ''} /></label>
       <label class="confirm-stock"><input class="receipt-learn-alias" type="checkbox" /> Diese Bonbezeichnung künftig automatisch zuordnen</label>
     </article>`;
   }).join('');
@@ -816,7 +828,7 @@ function receiptChoicesFromForm() {
       line_ids: line.line_ids || [line.line_id],
       label: card.querySelector('.receipt-label').value.trim(),
       decision,
-      quantity: Number(card.querySelector('.receipt-quantity').value),
+      quantity: decision === 'skip' ? null : parseReceiptQuantity(card.querySelector('.receipt-quantity').value),
       learn_alias: card.querySelector('.receipt-learn-alias').checked,
       tracking_mode: card.querySelector('.receipt-tracking-mode').value,
     };
@@ -841,15 +853,23 @@ function receiptChoicesFromForm() {
 
 async function recognizeReceipt() {
   if (!receiptFile || receiptRecognizing) return;
+  const file = receiptFile;
+  const recognitionTicket = receiptRecognitionGuard.begin();
+  const rotation = receiptRotation;
+  const crop = Object.fromEntries([...document.querySelectorAll('[data-crop]')].map((input) => [input.dataset.crop, Number(input.value) / 100]));
   receiptRecognizing = true;
   $('#receipt-recognize').disabled = true;
   receiptStatus('Foto wird lokal vorbereitet und anschließend mit Tesseract auf Home Assistant gelesen …');
   try {
-    const crop = Object.fromEntries([...document.querySelectorAll('[data-crop]')].map((input) => [input.dataset.crop, Number(input.value) / 100]));
-    const blob = await compressReceiptImage(receiptFile, { rotation: receiptRotation, crop });
-    receiptDraft = await api('receipts/recognize', {
-      method: 'POST', body: blob, headers: { 'Content-Type': 'image/jpeg' },
+    const recognition = await prepareAndRecognizeReceipt(receiptRecognitionGuard, recognitionTicket, file, {
+      imageOptions: { rotation, crop },
+      prepare: compressReceiptImage,
+      send: (blob, signal) => api('receipts/recognize', {
+        method: 'POST', body: blob, signal, headers: { 'Content-Type': 'image/jpeg' },
+      }),
     });
+    if (recognition.stale) return;
+    receiptDraft = recognition.result;
     receiptImportIntent = undefined;
     $('#receipt-meta').innerHTML = `<span>${escapeHtml(receiptDraft.merchant_label)}</span>${receiptDraft.receipt_date ? `<span>${escapeHtml(receiptDraft.receipt_date)}</span>` : ''}${receiptDraft.receipt_time ? `<span>${escapeHtml(receiptDraft.receipt_time)}</span>` : ''}${receiptDraft.total ? `<span>Summe ${escapeHtml(receiptDraft.total)} €</span>` : ''}<span>${receiptDraft.fingerprint_strength === 'strong' ? 'Dublettenprüfung: stark' : 'Dublettenprüfung: Hinweis'}</span>`;
     $('#receipt-ocr-languages').textContent = (receiptDraft.ocr?.languages || []).join(' + ');
@@ -867,16 +887,33 @@ async function recognizeReceipt() {
     sessionStorage.setItem('haInventory:lastReceiptId', receiptDraft.receipt_id);
     receiptStatus(`${receiptDraft.lines.length} Positionen erkannt. Prüfe Zuordnung und Menge; bis zur Bestätigung wurde kein Bestand verändert.`);
   } catch (error) {
-    receiptStatus(`${error.message} Du kannst das Bild korrigieren oder die Artikel weiterhin manuell erfassen.`, true);
+    if (receiptRecognitionGuard.isCurrent(recognitionTicket)) {
+      receiptStatus(`${error.message} Du kannst das Bild korrigieren oder die Artikel weiterhin manuell erfassen.`, true);
+    }
   } finally {
-    receiptRecognizing = false;
-    $('#receipt-recognize').disabled = false;
+    if (receiptRecognitionGuard.isCurrent(recognitionTicket)) {
+      receiptRecognizing = false;
+      $('#receipt-recognize').disabled = false;
+    }
   }
+}
+
+function setReceiptMutationLock(locked) {
+  [
+    '#receipt-camera-input', '#receipt-library-input', '#receipt-rotate-left',
+    '#receipt-rotate-right', '#receipt-recognize', '#receipt-clear-button',
+  ].forEach((selector) => { $(selector).disabled = locked; });
+  document.querySelectorAll('[data-crop]').forEach((input) => { input.disabled = locked; });
+  document.querySelectorAll('.receipt-file-button').forEach((label) => {
+    label.classList.toggle('is-disabled', locked);
+    label.setAttribute('aria-disabled', String(locked));
+  });
 }
 
 async function importReceipt() {
   if (!receiptDraft || receiptImporting || !$('#receipt-confirm').checked) return;
   receiptImporting = true;
+  setReceiptMutationLock(true);
   $('#receipt-import-button').disabled = true;
   $('#receipt-results').querySelectorAll('input,select').forEach((control) => { control.disabled = true; });
   try {
@@ -894,10 +931,11 @@ async function importReceipt() {
     $('#receipt-import-message').textContent = `${result.movements.length} Lagerbewegungen wurden gemeinsam gespeichert.`;
     $('#receipt-import-result').hidden = false;
     $('#receipt-undo-button').hidden = false;
+    $('#receipt-undo-note').hidden = false;
     $('#receipt-clear-button').hidden = true;
     receiptUndoIntentKey ||= createReceiptIdempotencyKey();
     $('#receipt-results').querySelectorAll('input,select,button').forEach((control) => { control.disabled = true; });
-    receiptStatus('Import abgeschlossen. Du kannst den gesamten Bon-Import im Verlauf gemeinsam rückgängig machen.');
+    receiptStatus('Import abgeschlossen. Die Bestandsbuchungen können gemeinsam rückgängig gemacht werden; neu angelegte Artikel und gelernte Zuordnungen bleiben bestehen.');
     await loadItems();
   } catch (error) {
     if (error.code === 'receipt_duplicate') {
@@ -915,14 +953,16 @@ async function importReceipt() {
     $('#receipt-results').querySelectorAll('input,select').forEach((control) => { control.disabled = false; });
   } finally {
     receiptImporting = false;
+    setReceiptMutationLock(false);
     updateReceiptImportAvailability();
   }
 }
 
 async function undoReceiptImport() {
   if (!receiptDraft || receiptUndoing) return;
-  if (!window.confirm('Alle durch diesen Kassenbon entstandenen Buchungen gemeinsam rückgängig machen? Das wird abgebrochen, wenn eine Position dadurch einen negativen Bestand hätte.')) return;
+  if (!window.confirm(RECEIPT_UNDO_CONFIRM_MESSAGE)) return;
   receiptUndoing = true;
+  setReceiptMutationLock(true);
   $('#receipt-undo-button').disabled = true;
   receiptUndoIntentKey ||= createReceiptIdempotencyKey();
   try {
@@ -931,6 +971,7 @@ async function undoReceiptImport() {
     });
     $('#receipt-import-message').textContent = `${result.movements.length} Bonbuchungen wurden gemeinsam rückgängig gemacht.`;
     $('#receipt-undo-button').hidden = true;
+    $('#receipt-undo-note').hidden = true;
     $('#receipt-clear-button').hidden = false;
     await loadItems();
   } catch (error) {
@@ -938,10 +979,18 @@ async function undoReceiptImport() {
     $('#receipt-undo-button').disabled = false;
   } finally {
     receiptUndoing = false;
+    setReceiptMutationLock(false);
   }
 }
 
 function clearReceipt() {
+  if (receiptImporting || receiptUndoing) {
+    receiptStatus('Der Import oder das Rückgängigmachen läuft. Bitte warte, bis der Vorgang abgeschlossen ist.', true);
+    return;
+  }
+  receiptRecognitionGuard.cancel();
+  receiptRecognizing = false;
+  $('#receipt-recognize').disabled = false;
   if (receiptObjectUrl) URL.revokeObjectURL(receiptObjectUrl);
   receiptObjectUrl = undefined;
   receiptFile = undefined;
@@ -954,6 +1003,7 @@ function clearReceipt() {
   $('#receipt-editor').hidden = true;
   $('#receipt-results').hidden = true;
   $('#receipt-import-result').hidden = true;
+  $('#receipt-undo-note').hidden = true;
   $('#receipt-clear-button').hidden = false;
   $('#receipt-lines').replaceChildren();
   $('#receipt-status').hidden = true;
@@ -1018,7 +1068,12 @@ function setActiveTab(view) {
 function updateReceiptImportAvailability() {
   const duplicateNotConfirmed = Boolean(receiptDraft?.duplicate_warning) && !$('#receipt-allow-duplicate').checked;
   const alreadyCompleted = !$('#receipt-import-result').hidden;
-  $('#receipt-import-button').disabled = !receiptDraft || !$('#receipt-confirm').checked || duplicateNotConfirmed || receiptImporting || alreadyCompleted;
+  const unresolvedQuantity = [...$('#receipt-lines').querySelectorAll('.receipt-line')].some((card) => (
+    card.querySelector('.receipt-choice').value !== 'skip'
+    && !isReceiptQuantityValid(card.querySelector('.receipt-quantity').value)
+  ));
+  $('#receipt-import-button').disabled = !receiptDraft || !$('#receipt-confirm').checked
+    || duplicateNotConfirmed || unresolvedQuantity || receiptImporting || alreadyCompleted;
 }
 
 let receiptRestoreAttempted = false;
@@ -1036,11 +1091,13 @@ async function restoreReceiptUndo() {
       $('#receipt-import-result').hidden = false;
       $('#receipt-import-message').textContent = 'Ein Kassenbon-Import wurde gespeichert. Die geprüften OCR-Zeilen werden aus Datenschutzgründen nach dem Neuladen nicht erneut angezeigt.';
       $('#receipt-undo-button').hidden = false;
+      $('#receipt-undo-note').hidden = false;
       $('#receipt-clear-button').hidden = true;
     } else if (result.receipt?.status === 'undone') {
       $('#receipt-import-result').hidden = false;
       $('#receipt-import-message').textContent = 'Dieser Kassenbon-Import wurde bereits rückgängig gemacht.';
       $('#receipt-undo-button').hidden = true;
+      $('#receipt-undo-note').hidden = true;
       $('#receipt-clear-button').hidden = false;
     } else {
       sessionStorage.removeItem('haInventory:lastReceiptId');

@@ -31,9 +31,11 @@ HA Inventory ist eine lokale, modulare Lagerverwaltung für Home Assistant. Vers
 - Lokale Texterkennung mit Tesseract `deu` + `eng` und Pillow im Home-Assistant-App-Container; keine Cloud-OCR und kein dauerhaftes Speichern des Fotos oder OCR-Volltexts
 - REWE- und Kaufland-orientierte Erkennung von Artikeln, Preisen, Mehrfachmengen, Datum, Summe und Händler; Pfand, Rückgaben, Rabatte, Summen und Zahlungsdaten werden möglichst herausgefiltert
 - Erkannte Positionen bleiben vor dem Import bearbeitbar. Katalogvorschläge und benutzergelernte Händler-Aliase helfen bei der Zuordnung; unbekannte Produkte werden nur nach ausdrücklicher Auswahl angelegt
-- Mengen- und Zuordnungsprüfung, Dublettenhinweis über Bildhash und Bon-Fingerprint sowie ausdrückliche Ausnahmebestätigung bei erneutem Import
+- Mengen- und Zuordnungsprüfung, Dublettenhinweis über Bildhash und Bon-Fingerprint sowie ausdrückliche Ausnahmebestätigung bei erneutem Import. Eine unklare Menge bleibt leer und muss vor dem Import eingetragen werden.
+- Mehrzeilige REWE-/Kaufland-Mengen wie `MILCH 1,09` gefolgt von `2 x 1,09 2,18` werden als zwei Packungen erkannt; unterbrochene/mehrdeutige Zuordnungen sind sichtbar prüfpflichtig.
+- Ein Foto-Wechsel oder Abbruch entwertet laufende Bildverarbeitung/OCR; verspätete Antworten des vorherigen Fotos werden verworfen.
 - Sammelimport nur nach Bestätigung; alle Buchungen und neu angelegten Artikel laufen atomar über `StockMovementService`. Idempotenzschlüssel schützen Wiederholungen nach Verbindungsabbrüchen.
-- Gesamter Bon-Import kann als atomare Sammelgegenbuchung rückgängig gemacht werden. Wenn spätere Buchungen ein sicheres Undo verhindern, bleibt der komplette Import unverändert.
+- Die Bestandsbuchungen eines Bons können atomar gemeinsam rückgängig gemacht werden. **Neu angelegte Artikel bleiben mit unbekanntem Bestand erhalten; gelernte Produktzuordnungen bleiben gespeichert.** Wenn spätere Buchungen ein sicheres Undo verhindern, bleibt der komplette Bestand unverändert.
 - Additive SQLite-Migration v7 für Bon-Metadaten, Händler-Aliase und Verknüpfungen zum Buchungsverlauf; vorhandene Artikel- und Bewegungs-IDs bleiben erhalten
 - Home-Assistant-Container enthält Tesseract sowie deutsche und englische Sprachdaten für `amd64` und `aarch64`; CI-Smoke prüft tatsächliche OCR mit einem synthetischen Bon
 

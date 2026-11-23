@@ -82,6 +82,45 @@ class ReceiptServiceTests(unittest.TestCase):
         self.assertEqual([line["quantity"] for line in parsed.lines], [2, 1])
         self.assertEqual(parsed.ignored_line_count, 3)
 
+    def test_rewe_split_multiplier_after_priced_product_line_updates_quantity(self) -> None:
+        parsed = parse_receipt([
+            OCRLine("REWE", .99), OCRLine("MILCH 1,09", .99),
+            OCRLine("2 x 1,09 2,18", .99), OCRLine("SUMME 2,18", .99),
+        ])
+        self.assertEqual([(row["label"], row["quantity"]) for row in parsed.lines], [("MILCH", 2)])
+        self.assertFalse(parsed.lines[0]["requires_review"])
+
+    def test_kaufland_split_multiplier_supports_price_absent_and_present_product_rows(self) -> None:
+        parsed = parse_receipt([
+            OCRLine("KAUFLAND", .99), OCRLine("BIO JOGHURT", .99), OCRLine("2 x 0,89 1,78", .99),
+            OCRLine("HAFERDRINK 1,49", .99), OCRLine("3 STK", .99),
+            OCRLine("BANANEN 1,29", .99), OCRLine("2 x 1,29", .99),
+            OCRLine("SUMME 7,14", .99),
+        ])
+        self.assertEqual([row["quantity"] for row in parsed.lines], [2, 3, 2])
+        self.assertEqual([row["label"] for row in parsed.lines], ["BIO JOGHURT", "HAFERDRINK", "BANANEN"])
+        self.assertEqual([row["requires_review"] for row in parsed.lines], [False, False, False])
+
+    def test_split_multiplier_after_discount_or_deposit_is_reviewed(self) -> None:
+        for interruption in ("RABATT -0,10", "PFAND 0,25", "-0,10"):
+            with self.subTest(interruption=interruption):
+                parsed = parse_receipt([
+                    OCRLine("REWE", .99), OCRLine("MILCH 1,09", .99),
+                    OCRLine(interruption, .99), OCRLine("2 x 1,09 2,18", .99),
+                    OCRLine("SUMME 2,18", .99),
+                ])
+                self.assertEqual(len(parsed.lines), 1)
+                self.assertEqual(parsed.lines[0]["quantity"], 2)
+                self.assertTrue(parsed.lines[0]["requires_review"])
+
+    def test_currency_amounts_are_never_used_as_counts_and_bare_multiplier_needs_review(self) -> None:
+        parsed = parse_receipt([
+            OCRLine("KAUFLAND", .99), OCRLine("KÄSE 2,99", .99),
+            OCRLine("SAFT 1,49", .99), OCRLine("2 x", .99),
+        ])
+        self.assertEqual([(row["label"], row["quantity"]) for row in parsed.lines], [("KÄSE", 1), ("SAFT", 2)])
+        self.assertTrue(parsed.lines[1]["requires_review"])
+
     def test_kaufland_store_lines_discounts_returns_and_payment_are_ignored(self) -> None:
         parsed = parse_receipt([
             OCRLine("KAUFLAND", .99), OCRLine("BIO JOGHURT 0,89", .99),
@@ -152,6 +191,15 @@ class ReceiptServiceTests(unittest.TestCase):
         restored_new = self.inventory.get(new_item["id"])
         self.assertIsNone(restored_new["quantity"])
         self.assertEqual(restored_new["tracking_mode"], "simple")
+        connection = self.database.connect()
+        try:
+            retained_alias = connection.execute(
+                "SELECT item_id FROM receipt_product_aliases WHERE merchant = 'rewe' AND normalized_alias = 'milch'"
+            ).fetchone()
+        finally:
+            connection.close()
+        self.assertIsNotNone(retained_alias)
+        self.assertEqual(retained_alias["item_id"], milk["id"])
         replay_undo = self.receipts.undo_receipt(recognized["receipt_id"], {
             "confirmed": True, "idempotency_key": "undo-import-1",
         })
