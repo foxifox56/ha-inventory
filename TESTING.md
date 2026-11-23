@@ -12,9 +12,9 @@ Stand: 23.11.2026 · Branch `development/v0.3`. Automatisierte Tests verwenden t
 | Syntax | `compileall` und `node --check` für App, API-Client, Produkt-Lookup, Scanner, Navigations- und Buchungsmodule bestanden |
 | Home-Assistant-App-Konfiguration | YAML erfolgreich gelesen; Version `0.3.0`, Architekturen `aarch64`/`amd64`, `backup: cold` |
 | Docker lokal | Nicht ausgeführt: Docker-CLI ist in der Entwicklungsumgebung nicht verfügbar |
-| Docker-Smoke-Test in GitHub Actions | Wird nach Push der Review-Korrekturen für `linux/amd64` und `linux/arm64` ausgeführt; umfasst Buchung, idempotentes Replay, Undo und Verlauf nach Neustart |
-| GitHub Actions Push-Workflow | Für den Korrektur-Commit noch nicht ausgeführt; Ergebnis und Link werden nach Abschluss hier ergänzt |
-| GitHub Actions PR-Workflow | Für den Korrektur-Commit noch nicht ausgeführt; Ergebnis und Link werden nach Abschluss hier ergänzt |
+| Docker-Smoke-Test in GitHub Actions | Erfolgreich auf `linux/amd64` und `linux/arm64`; umfasst Buchung, idempotentes Replay, Undo und Verlauf nach Neustart |
+| GitHub Actions Push-Workflow | [Run #29](https://github.com/foxifox56/ha-inventory/actions/runs/45234883448) erfolgreich für Commit `981a3f6`: Tests sowie AMD64- und ARM64-Container-Smoke bestanden |
+| GitHub Actions PR-Workflow | [Run #30](https://github.com/foxifox56/ha-inventory/actions/runs/45234897364) erfolgreich für Commit `981a3f6`: Tests sowie AMD64- und ARM64-Container-Smoke bestanden |
 
 Befehle aus `ha_inventory/`:
 
@@ -25,7 +25,7 @@ python3 -m compileall -q backend
 for file in frontend/*.js frontend/*.mjs frontend/vendor/*.mjs; do node --check "$file" || exit 1; done
 ```
 
-Die lokalen Tests wurden nach den Review-Korrekturen ausgeführt. GitHub Actions wird nach dem Push denselben Testumfang sowie Container-Smokes für `linux/amd64` und `linux/arm64` ausführen. Ein ARM64-Container-Test ist kein Supervisor- oder Raspberry-Pi-Hardwaretest; er belegt keinen echten Pi-/Supervisor-Test.
+Die lokalen Tests wurden nach den Review-Korrekturen ausgeführt. Die GitHub-Actions-Runs #29 und #30 prüften den Korrekturstand `981a3f6` einschließlich Backend-/Frontendtests und Container-Smokes für `linux/amd64` und `linux/arm64`. Ein ARM64-Container-Test ist kein Supervisor- oder Raspberry-Pi-Hardwaretest; er belegt keinen echten Pi-/Supervisor-Test.
 
 ## Manuelle Testanleitung: iPhone über Ingress und Nabu Casa
 
