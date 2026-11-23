@@ -17,7 +17,8 @@ Dieses Protokoll unterscheidet automatisierte lokale Prüfungen, isolierte Conta
 | Bestand nach Barcode-Lookup | Bestanden: ein Scan-Lookup ändert Menge und Status nicht |
 | Ingress-Grenze | Bestanden: Test lässt nur `172.30.32.2` zu und weist direkte Anfragen ab |
 | Abhängigkeit ZXing | Lokal gebündelt; keine Laufzeit-CDN-Abfrage |
-| Docker-Smoke-Test lokal | Nicht ausführbar: Docker-CLI ist in dieser Entwicklungsumgebung nicht installiert |
+| Docker-Smoke-Test lokal | Nicht verfügbar: Docker-CLI ist in dieser Entwicklungsumgebung nicht installiert |
+| Docker-Smoke-Test in GitHub Actions | Bestanden für `linux/amd64` und `linux/arm64`: [Workflow-Lauf #8](https://github.com/foxifox56/ha-inventory/actions/runs/45182620767) |
 | Echte iPhone-/Safari-Kamera | Nicht getestet; Scanner-Decoder, Rückkamera-Constraint und Stop-Verhalten sind mit Node-Mocks getestet |
 | Home Assistant Supervisor / Raspberry Pi 4 | Nicht getestet; es gab keine Installation auf dem produktiven Pi |
 | PWA auf iOS / Nabu Casa | Nicht getestet und nicht implementiert; offene Punkte stehen in `docs/PWA-architecture.md` |
@@ -36,7 +37,7 @@ node --check frontend/vendor/zxing-browser.mjs
 
 ## Container-Smoke-Test
 
-`scripts/container-smoke.sh` baut das App-Image, prüft den Start, die Ingress-Quell-IP, die versionierte API, die Schreibsitzung und `/data`-Persistenz nach Entfernen und Neuerstellen des Containers. GitHub Actions führt ihn mit Docker Buildx für `linux/amd64` und `linux/arm64` aus. Da der lokale Docker-Client fehlt, wird das Ergebnis dieses PR-Laufs ergänzt, sobald GitHub Actions abgeschlossen ist.
+`scripts/container-smoke.sh` baut das App-Image, prüft den Start, die Ingress-Quell-IP, die versionierte API, die Schreibsitzung und `/data`-Persistenz nach Entfernen und Neuerstellen des Containers. GitHub Actions führte ihn am 23.11.2026 mit Docker Buildx für `linux/amd64` und `linux/arm64` aus; beide Plattformen bestanden im [Workflow-Lauf #8](https://github.com/foxifox56/ha-inventory/actions/runs/45182620767). Der lokale Docker-Client fehlt weiterhin.
 
 Der ARM64-Build prüft den Image- und Laufzeitpfad für einen Raspberry Pi 4 mit Home Assistant OS 64-bit (`rpi4-64`/`aarch64`); er ersetzt keinen echten Supervisor-/Pi-Test. Die 32-Bit-Architektur `armv7` wird nicht angeboten. Siehe die offizielle [Raspberry-Pi-Installationsanleitung](https://www.home-assistant.io/installation/raspberrypi/) und die [HA-Systemarchitekturübersicht](https://www.home-assistant.io/more-info/unsupported/system_architecture/).
 
