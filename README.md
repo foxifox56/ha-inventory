@@ -20,8 +20,9 @@ HA Inventory ist eine lokale, modulare Lagerverwaltung für Home Assistant. Vers
 - Verbrauchsmodus bucht standardmäßig eine Packung je Scan; eine größere ganze Anzahl kann vor dem Scan ausgewählt werden
 - Transaktionale und idempotente Bestandsbuchungen mit Schutz vor Doppelbuchungen, negativen Beständen und parallelem Überziehen
 - Dauerhafter Verlauf je Artikel; Rückgängig ist eine eigene Gegenbuchung und pro Buchung nur einmal möglich
-- SQLite-Migration v5 fügt nur die Buchungstabelle hinzu; vorhandene Artikel-IDs und Daten bleiben unverändert
-- Ein unbekannter oder einfacher Bestand muss ausdrücklich als Startbestand initialisiert werden, bevor er numerisch gebucht werden kann
+- SQLite-Migration v5 ergänzt die Buchungstabelle; v6 baut nur diese Tabelle datengetreu um, damit bestätigte Nullbestände journalisiert werden können. Artikel- und Bewegungs-IDs bleiben erhalten.
+- Ein unbekannter oder einfacher Bestand muss ausdrücklich als Startbestand initialisiert werden, bevor er numerisch gebucht werden kann; ein bestätigter Startbestand von `0` ist bekannt und von `null` (unbekannt) unterscheidbar
+- Unsichere Wiederholungen nach einem Verbindungsabbruch verwenden denselben gespeicherten Idempotenzschlüssel, damit eine bereits bestätigte Buchung nicht doppelt angewendet wird
 - PWA- und Home-Screen-Optionen sind untersucht und in [docs/PWA-architecture.md](docs/PWA-architecture.md) verglichen. Eine vollständige PWA wird noch nicht ausgeliefert.
 
 Die API-Spezifikation einschließlich Produktsuche befindet sich in [docs/API.md](docs/API.md). Die längerfristige Integrationsarchitektur für Sensoren, Aktionen, Ereignisse und To-do-/Einkaufslisten steht in [docs/architecture.md](docs/architecture.md). In 0.2 ist die eigenständige HA-Integration noch nicht installierbar; sie wartet auf einen sicheren authentifizierten Integrationszugang.

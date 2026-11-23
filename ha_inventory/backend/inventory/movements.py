@@ -29,6 +29,12 @@ class StockMovementService:
         return value
 
     @staticmethod
+    def _initial_quantity(value: Any) -> int:
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise InventoryError("Der Startbestand muss eine ganze Zahl ab 0 sein.", field="quantity")
+        return value
+
+    @staticmethod
     def _key(payload: dict[str, Any]) -> str:
         value = payload.get("idempotency_key")
         if not isinstance(value, str) or not value.strip() or len(value.strip()) > 128:
@@ -80,7 +86,11 @@ class StockMovementService:
         action = payload.get("action")
         if not isinstance(action, str) or action not in self.ACTIONS:
             raise InventoryError("Aktion muss receive, consume oder initialize sein.", field="action")
-        quantity = self._positive_integer(payload.get("quantity"))
+        quantity = (
+            self._initial_quantity(payload.get("quantity"))
+            if action == "initialize"
+            else self._positive_integer(payload.get("quantity"))
+        )
         key = self._key(payload)
         source = self._label(payload, "source", "manual", 32)
         note = self._label(payload, "note", "", 500)
@@ -184,12 +194,22 @@ class StockMovementService:
                 raise InventoryError("Artikel nicht gefunden.", status_code=404)
             item = dict(item_row)
             if original["action"] == "initialize":
-                later_delta = connection.execute(
-                    "SELECT COALESCE(SUM(delta_quantity), 0) AS total FROM stock_movements "
-                    "WHERE item_id = ? AND id > ?",
+                later_active = connection.execute(
+                    """SELECT 1 FROM stock_movements AS later
+                       WHERE later.item_id = ? AND later.id > ? AND later.action != 'undo'
+                         AND NOT EXISTS (
+                             SELECT 1 FROM stock_movements AS reversal
+                             WHERE reversal.undo_of_movement_id = later.id
+                         )
+                       LIMIT 1""",
                     (original["item_id"], movement_id),
                 ).fetchone()
-                if later_delta["total"] != 0 or item["quantity"] != original["quantity_after"]:
+                current_matches_baseline = (
+                    item["quantity"] == original["quantity_after"]
+                    and item["tracking_mode"] == original["tracking_mode_after"]
+                    and item["stock_status"] == original["stock_status_after"]
+                )
+                if later_active or not current_matches_baseline:
                     raise InventoryError("Der Startbestand kann erst rückgängig gemacht werden, wenn spätere Buchungen zuerst aufgehoben sind.", status_code=409)
                 after_quantity = None
                 after_mode = original["tracking_mode_before"]

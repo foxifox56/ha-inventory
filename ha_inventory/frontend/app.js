@@ -5,7 +5,10 @@ import { startZXingScanner } from './zxing-scanner.mjs';
 import { BrowserMultiFormatReader } from './vendor/zxing-browser.mjs';
 import { createApiClient } from './api-client.mjs';
 import { productPrefillValues } from './product-prefill.mjs';
-import { bookingForScan, buildMovementPayload, createIdempotencyKey, createScanDeduplicator } from './stock-booking.mjs';
+import {
+  bookingForScan, buildMovementPayload, createMovementIntentStore, createScanDeduplicator,
+  createScanRequestGuard, parseScanQuantity,
+} from './stock-booking.mjs';
 
 const API = new URL('api/v1/', document.baseURI).toString();
 const apiClient = createApiClient((...args) => window.fetch(...args), API);
@@ -35,8 +38,18 @@ let bookingInProgress = false;
 let activeBookingItem;
 let activeBookingAction = 'receive';
 let activeBookingSource = 'manual';
+let activeBookingIntent;
 let pendingCreateBooking = false;
+let pendingScanBooking;
 const duplicateScan = createScanDeduplicator(1200);
+const movementIntents = createMovementIntentStore();
+const scanRequestGuard = createScanRequestGuard();
+
+function uncertainMovementError(error) {
+  return !Number.isInteger(error?.status)
+    || error.status === 408 || error.status === 425 || error.status === 429
+    || error.status >= 500;
+}
 
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, (character) => ({
@@ -335,36 +348,59 @@ function hasKnownCount(item) {
 function openBookingDialog(item, requestedAction = 'receive', source = 'manual', quantity = 1) {
   if (!item) return;
   const decision = bookingForScan(requestedAction === 'consume' ? 'consume' : 'receive', item);
-  const action = requestedAction === 'initialize' ? 'initialize' : decision.action;
+  let action = requestedAction === 'initialize' ? 'initialize' : decision.action;
+  let requestedQuantity = quantity;
+  let initialMode = item.tracking_mode === 'inventory' ? 'inventory' : 'exact';
+  activeBookingIntent = movementIntents.findPending(item.id)
+    .filter((intent) => ['receive', 'consume', 'initialize'].includes(intent.action))
+    .at(-1);
+  if (activeBookingIntent) {
+    action = activeBookingIntent.action;
+    requestedQuantity = activeBookingIntent.quantity;
+    initialMode = activeBookingIntent.trackingMode || initialMode;
+  }
   if (action === 'unavailable') {
     showToast('Der Zahlenbestand ist unbekannt. Lege zuerst über „Einlagern“ einen Startbestand fest.');
     return;
   }
   activeBookingItem = item;
   activeBookingAction = action;
-  activeBookingSource = source;
+  activeBookingSource = activeBookingIntent?.source || source;
   $('#booking-title').textContent = action === 'initialize'
     ? 'Startbestand festlegen'
     : (action === 'consume' ? 'Verbrauchen' : 'Einlagern');
   $('#booking-item-name').textContent = item.name;
-  $('#booking-quantity').value = String(Number.isInteger(quantity) && quantity > 0 ? quantity : 1);
+  $('#booking-quantity').min = action === 'initialize' ? '0' : '1';
+  $('#booking-quantity').value = String(Number.isSafeInteger(requestedQuantity)
+    && (action === 'initialize' ? requestedQuantity >= 0 : requestedQuantity > 0) ? requestedQuantity : 1);
   $('#initial-stock-fields').hidden = action !== 'initialize';
-  $('#confirm-initial-stock').checked = false;
-  $('#initial-tracking-mode').value = item.tracking_mode === 'inventory' ? 'inventory' : 'exact';
-  $('#booking-stock-note').textContent = action === 'initialize'
-    ? 'Für diesen Artikel ist noch keine Stückzahl bekannt. Die Menge wird erst nach deiner ausdrücklichen Bestätigung als Startbestand gesetzt.'
-    : (action === 'consume'
-      ? `Aktueller Bestand: ${stockLabel(item)}. Verbrauch wird erst nach Bestätigung gebucht.`
-      : `Aktueller Bestand: ${stockLabel(item)}. Die Packungsgröße des Produkts ändert die Anzahl nicht.`);
-  $('#booking-submit').textContent = action === 'initialize'
-    ? 'Startbestand bestätigen'
-    : (action === 'consume' ? 'Verbrauch bestätigen' : 'Einlagern bestätigen');
+  $('#confirm-initial-stock').checked = Boolean(activeBookingIntent) && action === 'initialize';
+  $('#initial-tracking-mode').value = initialMode;
+  $('#booking-quantity').disabled = Boolean(activeBookingIntent);
+  $('#initial-tracking-mode').disabled = Boolean(activeBookingIntent);
+  $('#confirm-initial-stock').disabled = Boolean(activeBookingIntent);
+  $('#booking-submit').textContent = activeBookingIntent
+    ? 'Dieselbe Buchung erneut senden'
+    : (action === 'initialize'
+      ? 'Startbestand bestätigen'
+      : (action === 'consume' ? 'Verbrauch bestätigen' : 'Einlagern bestätigen'));
+  $('#booking-stock-note').textContent = activeBookingIntent
+    ? 'Eine frühere Buchung wurde nicht bestätigt. Sende dieselbe Buchung mit demselben Idempotenzschlüssel erneut, um sicher festzustellen, ob sie bereits gespeichert wurde.'
+    : (action === 'initialize'
+      ? 'Für diesen Artikel ist noch keine Stückzahl bekannt. Auch 0 ist ein gültiger Startbestand. Die Menge wird erst nach deiner ausdrücklichen Bestätigung gesetzt.'
+      : (action === 'consume'
+        ? `Aktueller Bestand: ${stockLabel(item)}. Verbrauch wird erst nach Bestätigung gebucht.`
+        : `Aktueller Bestand: ${stockLabel(item)}. Die Packungsgröße des Produkts ändert die Anzahl nicht.`));
   $('#booking-error').hidden = true;
   if (!bookingDialog.open) bookingDialog.showModal();
 }
 
-async function writeMovement(item, action, quantity, source, { initialMode } = {}) {
-  const payload = buildMovementPayload(action, quantity, createIdempotencyKey(), {
+async function writeMovement(item, action, quantity, source, { initialMode, intent } = {}) {
+  const movementIntent = intent || movementIntents.getOrCreate({
+    itemId: item.id, action, quantity, source,
+    trackingMode: action === 'initialize' ? (initialMode || 'exact') : '',
+  });
+  const payload = buildMovementPayload(action, quantity, movementIntent.idempotencyKey, {
     source,
     trackingMode: initialMode || 'exact',
   });
@@ -372,33 +408,51 @@ async function writeMovement(item, action, quantity, source, { initialMode } = {
     method: 'POST',
     body: JSON.stringify(payload),
   });
+  if (!result?.movement) throw new Error('Die Serverantwort war unvollständig; Ergebnis bitte sicher erneut abgleichen.');
+  movementIntents.complete(movementIntent);
   return result.movement;
 }
 
 function movementMessage(item, movement) {
   if (movement.action === 'undo') return `Buchung für ${item.name} wurde rückgängig gemacht.`;
+  if (movement.action === 'initialize') {
+    return `Startbestand für ${item.name} auf ${movement.quantity_after} gesetzt.`;
+  }
   const amount = `${Math.abs(movement.delta_quantity)} ${Math.abs(movement.delta_quantity) === 1 ? 'Packung' : 'Packungen'}`;
   return movement.action === 'consume'
     ? `${amount} ${item.name} verbraucht.`
     : `${amount} ${item.name} eingelagert.`;
 }
 
-async function consumeFromScan(item, quantity) {
+async function consumeFromScan(item, quantity, request) {
+  if (request && !scanRequestGuard.isCurrent(request, $('#scan-mode').value)) return;
   if (!hasKnownCount(item)) {
     $('#camera-status').textContent = `${item.name}: Der Zahlenbestand ist unbekannt. Es wurde nichts abgezogen. Öffne „Einlagern“, um einen Startbestand festzulegen.`;
     $('#camera-status').hidden = false;
     return;
   }
+  const pending = movementIntents.findPending(item.id)
+    .find((intent) => intent.action === 'consume' && intent.source === 'barcode');
+  const intendedQuantity = pending?.quantity ?? quantity;
+  const intent = pending || movementIntents.getOrCreate({
+    itemId: item.id, action: 'consume', quantity: intendedQuantity, source: 'barcode',
+  });
+  pendingScanBooking = { item, quantity: intendedQuantity, intent };
   try {
-    const movement = await writeMovement(item, 'consume', quantity, 'barcode');
+    const movement = await writeMovement(item, 'consume', intendedQuantity, 'barcode', { intent });
+    pendingScanBooking = undefined;
+    $('#retry-scan-booking').hidden = true;
     await loadItems();
     const current = items.find((entry) => entry.id === item.id) || item;
     $('#camera-status').textContent = movementMessage(item, movement);
     $('#camera-status').hidden = false;
     showUndoToast(current, movement, movementMessage(item, movement));
   } catch (error) {
-    $('#camera-status').textContent = `Nicht gebucht: ${error.message}`;
+    $('#camera-status').textContent = uncertainMovementError(error)
+      ? `Verbindung unterbrochen: Die Buchung könnte bereits gespeichert sein. Wiederhole dieselbe Buchung mit „Sicher abgleichen“; derselbe Schlüssel verhindert eine Doppelbuchung. (${error.message})`
+      : `Nicht gebucht: ${error.message}`;
     $('#camera-status').hidden = false;
+    $('#retry-scan-booking').hidden = false;
   }
 }
 
@@ -435,11 +489,17 @@ function renderHistory(movements, item) {
 async function undoMovement(movementId, itemId) {
   const item = items.find((entry) => entry.id === itemId) || activeDetailItem || activeBookingItem;
   if (!item) return;
+  const intent = movementIntents.getOrCreate({
+    itemId: item.id, action: 'undo', quantity: 1, source: 'ui',
+    undoOfMovementId: movementId,
+  });
   try {
     const result = await api(`movements/${movementId}/undo`, {
       method: 'POST',
-      body: JSON.stringify({ idempotency_key: createIdempotencyKey(), source: 'ui' }),
+      body: JSON.stringify({ idempotency_key: intent.idempotencyKey, source: 'ui' }),
     });
+    if (!result?.movement) throw new Error('Die Serverantwort war unvollständig; Ergebnis bitte erneut abgleichen.');
+    movementIntents.complete(intent);
     await loadItems();
     showToast(movementMessage(item, result.movement));
     if (historyDialog.open) await openHistory(activeDetailItem || item);
@@ -449,6 +509,8 @@ async function undoMovement(movementId, itemId) {
 }
 
 function closeScanDialog() {
+  scanRequestGuard.invalidate();
+  lookupAbortController?.abort();
   if (scanDialog.open) scanDialog.close();
   stopCamera();
   setActiveTab(scanReturnView);
@@ -470,20 +532,38 @@ async function lookupBarcode(rawBarcode) {
   const controller = new AbortController();
   lookupAbortController = controller;
   const mode = $('#scan-mode').value;
-  const quantity = Math.max(1, Math.floor(Number($('#scan-quantity').value) || 1));
+  const request = scanRequestGuard.begin(mode);
+  if (mode !== 'view' && parseScanQuantity($('#scan-quantity').value) === null) {
+    barcodeLookupInProgress = false;
+    lookupAbortController = undefined;
+    $('#camera-status').textContent = 'Gib eine ganze Packungszahl größer 0 ein. Es wurde nichts gebucht.';
+    $('#camera-status').hidden = false;
+    $('#manual-entry-button').hidden = mode === 'consume';
+    return;
+  }
+  const currentRequest = () => scanRequestGuard.isCurrent(request, $('#scan-mode').value);
   const result = await lookupBarcodeValue(barcode, async (code, { signal }) => {
     return api(`product-lookup/${encodeURIComponent(code)}`, { signal });
   }, {
     pending: (code) => {
+      if (!currentRequest()) return;
       $('#scan-input').value = code;
       $('#lookup-button').disabled = true;
       $('#lookup-button').textContent = 'Suche …';
       $('#camera-status').textContent = 'Artikel und Produktdaten werden gesucht …';
       $('#camera-status').hidden = false;
-      $('#manual-entry-button').hidden = false;
+      $('#manual-entry-button').hidden = mode === 'consume';
     },
     found: async (item) => {
-      const next = bookingForScan(mode, item);
+      if (!currentRequest()) return;
+      const currentMode = $('#scan-mode').value;
+      const quantity = parseScanQuantity($('#scan-quantity').value);
+      if (currentMode !== 'view' && quantity === null) {
+        $('#camera-status').textContent = 'Gib eine ganze Packungszahl größer 0 ein. Es wurde nichts gebucht.';
+        $('#camera-status').hidden = false;
+        return;
+      }
+      const next = bookingForScan(currentMode, item);
       if (next.action === 'view') {
         closeScanDialog();
         openDetailItem(item);
@@ -491,45 +571,51 @@ async function lookupBarcode(rawBarcode) {
         closeScanDialog();
         openBookingDialog(item, next.action, 'barcode', quantity);
       } else if (next.action === 'consume') {
-        await consumeFromScan(item, quantity);
+        await consumeFromScan(item, quantity, request);
       } else {
         $('#camera-status').textContent = `${item.name}: Der Bestand ist unbekannt. Es wurde nichts geändert. Wechsle zu „Einlagern“, um einen Startbestand festzulegen.`;
         $('#camera-status').hidden = false;
       }
     },
     identified: async (barcode, product) => {
-      if (mode === 'consume') {
+      if (!currentRequest()) return;
+      const currentMode = $('#scan-mode').value;
+      if (currentMode === 'consume') {
         $('#camera-status').textContent = 'Der Code gehört noch nicht zu einem Lagerartikel. Es wurde nichts angelegt oder abgezogen. Wechsle zu „Ansehen“ oder „Einlagern“. ';
         $('#camera-status').hidden = false;
         return;
       }
-      pendingCreateBooking = mode === 'receive';
+      pendingCreateBooking = currentMode === 'receive';
       closeScanDialog();
       openNewItem(barcode, product);
     },
     missing: async (barcode) => {
-      if (mode === 'consume') {
+      if (!currentRequest()) return;
+      const currentMode = $('#scan-mode').value;
+      if (currentMode === 'consume') {
         $('#camera-status').textContent = 'Kein gespeicherter Lagerartikel gefunden. Im Verbrauchsmodus wird nichts angelegt oder verändert. Wechsle zu „Ansehen“ oder „Einlagern“. ';
         $('#camera-status').hidden = false;
         return;
       }
-      pendingCreateBooking = mode === 'receive';
+      pendingCreateBooking = currentMode === 'receive';
       closeScanDialog();
       openNewItem(barcode);
     },
     failed: (error, barcode) => {
+      if (!currentRequest()) return;
       lookupFailed = true;
       stopCamera();
       $('#scan-input').value = barcode;
       $('#camera-status').textContent = `Produktsuche nicht verfügbar: ${error.message} Du kannst es erneut versuchen oder den Artikel manuell erfassen.`;
       $('#camera-status').hidden = false;
-      $('#manual-entry-button').hidden = mode === 'consume';
+      $('#manual-entry-button').hidden = $('#scan-mode').value === 'consume';
     },
     waiting: (_barcode, retryAfterSeconds, attempt) => {
+      if (!currentRequest()) return;
       const seconds = Math.max(1, Math.ceil(retryAfterSeconds));
       $('#camera-status').textContent = `Open Facts begrenzt Anfragen gerade. Automatischer erneuter Versuch in etwa ${seconds} Sekunden (Versuch ${attempt}). Manuelle Erfassung ist jederzeit möglich.`;
       $('#camera-status').hidden = false;
-      $('#manual-entry-button').hidden = mode === 'consume';
+      $('#manual-entry-button').hidden = $('#scan-mode').value === 'consume';
     },
     cancelled: () => {
       // The manual-entry action or dialog close owns the next UI state.
@@ -552,6 +638,7 @@ function openManualEntryFromScan() {
     return;
   }
   const barcode = $('#scan-input').value.trim();
+  scanRequestGuard.invalidate();
   lookupAbortController?.abort();
   pendingCreateBooking = $('#scan-mode').value === 'receive';
   closeScanDialog();
@@ -619,9 +706,18 @@ function stopCamera() {
 
 function syncScanMode() {
   const mode = $('#scan-mode').value;
+  const wasLookingUp = barcodeLookupInProgress;
+  scanRequestGuard.invalidate();
+  if (wasLookingUp) {
+    lookupAbortController?.abort();
+    $('#camera-status').textContent = 'Scan-Modus geändert. Die laufende Suche wurde abgebrochen; scanne den Artikel im neuen Modus erneut.';
+    $('#camera-status').hidden = false;
+  } else {
+    $('#camera-status').hidden = true;
+  }
   $('#scan-quantity-field').hidden = mode === 'view';
-  $('#camera-status').hidden = true;
   $('#manual-entry-button').hidden = true;
+  $('#retry-scan-booking').hidden = !(pendingScanBooking && mode === 'consume');
 }
 
 function setView(view, { focusSearch = false } = {}) {
@@ -703,6 +799,17 @@ $('#close-scan-dialog').addEventListener('click', closeScanDialog);
 $('#camera-button').addEventListener('click', startCamera);
 $('#lookup-button').addEventListener('click', () => lookupBarcode($('#scan-input').value));
 $('#manual-entry-button').addEventListener('click', openManualEntryFromScan);
+$('#retry-scan-booking').addEventListener('click', async () => {
+  if (!pendingScanBooking) return;
+  if ($('#scan-mode').value !== 'consume') {
+    showToast('Zum sicheren Abgleich zuerst wieder „Verbrauchen“ auswählen.');
+    return;
+  }
+  const { item, quantity } = pendingScanBooking;
+  $('#retry-scan-booking').disabled = true;
+  await consumeFromScan(item, quantity);
+  $('#retry-scan-booking').disabled = false;
+});
 $('#scan-mode').addEventListener('change', syncScanMode);
 $('#scan-input').addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {
@@ -805,7 +912,7 @@ form.addEventListener('submit', async (event) => {
         saved.item,
         'initialize',
         'barcode',
-        Math.max(1, Math.floor(Number($('#scan-quantity').value) || 1)),
+        parseScanQuantity($('#scan-quantity').value) ?? 1,
       );
     }
   } catch (error) {
@@ -821,13 +928,18 @@ form.addEventListener('submit', async (event) => {
 bookingForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   if (bookingInProgress || !activeBookingItem) return;
-  const quantity = Number($('#booking-quantity').value);
-  if (!Number.isInteger(quantity) || quantity <= 0) {
-    $('#booking-error').textContent = 'Gib eine ganze Anzahl größer 0 ein.';
+  const quantityText = $('#booking-quantity').value.trim();
+  const quantity = activeBookingIntent?.quantity ?? (quantityText === '' ? NaN : Number(quantityText));
+  const validQuantity = Number.isSafeInteger(quantity)
+    && (activeBookingAction === 'initialize' ? quantity >= 0 : quantity > 0);
+  if (!validQuantity) {
+    $('#booking-error').textContent = activeBookingAction === 'initialize'
+      ? 'Gib eine ganze Anzahl ab 0 ein.'
+      : 'Gib eine ganze Anzahl größer 0 ein.';
     $('#booking-error').hidden = false;
     return;
   }
-  if (activeBookingAction === 'initialize' && !$('#confirm-initial-stock').checked) {
+  if (activeBookingAction === 'initialize' && !activeBookingIntent && !$('#confirm-initial-stock').checked) {
     $('#booking-error').textContent = 'Bitte bestätige ausdrücklich den Startbestand.';
     $('#booking-error').hidden = false;
     return;
@@ -835,17 +947,41 @@ bookingForm.addEventListener('submit', async (event) => {
   bookingInProgress = true;
   $('#booking-submit').disabled = true;
   $('#booking-error').hidden = true;
+  const initialMode = activeBookingIntent?.trackingMode || $('#initial-tracking-mode').value;
+  const intent = activeBookingIntent || movementIntents.getOrCreate({
+    itemId: activeBookingItem.id, action: activeBookingAction, quantity,
+    source: activeBookingSource,
+    trackingMode: activeBookingAction === 'initialize' ? initialMode : '',
+  });
   try {
     const movement = await writeMovement(activeBookingItem, activeBookingAction, quantity, activeBookingSource, {
-      initialMode: $('#initial-tracking-mode').value,
+      initialMode,
+      intent,
     });
     const bookedItem = activeBookingItem;
+    activeBookingIntent = undefined;
     bookingDialog.close();
     await loadItems();
     const current = items.find((item) => item.id === bookedItem.id) || bookedItem;
     showUndoToast(current, movement, movementMessage(bookedItem, movement));
   } catch (error) {
-    $('#booking-error').textContent = error.message;
+    if (uncertainMovementError(error)) {
+      activeBookingIntent = intent;
+      $('#booking-quantity').disabled = true;
+      $('#initial-tracking-mode').disabled = true;
+      $('#confirm-initial-stock').disabled = true;
+      $('#booking-submit').textContent = 'Dieselbe Buchung erneut senden';
+      $('#booking-error').textContent = `Die Verbindung wurde unterbrochen; die Buchung könnte bereits gespeichert sein. Sende dieselbe Buchung erneut, um sie mit demselben Schlüssel sicher abzugleichen. (${error.message})`;
+    } else {
+      activeBookingIntent = undefined;
+      $('#booking-quantity').disabled = false;
+      $('#initial-tracking-mode').disabled = false;
+      $('#confirm-initial-stock').disabled = false;
+      $('#booking-submit').textContent = activeBookingAction === 'initialize'
+        ? 'Startbestand bestätigen'
+        : (activeBookingAction === 'consume' ? 'Verbrauch bestätigen' : 'Einlagern bestätigen');
+      $('#booking-error').textContent = error.message;
+    }
     $('#booking-error').hidden = false;
   } finally {
     bookingInProgress = false;
@@ -858,6 +994,7 @@ itemDialog.addEventListener('close', () => {
 });
 
 scanDialog.addEventListener('close', () => {
+  scanRequestGuard.invalidate();
   lookupAbortController?.abort();
   stopCamera();
 });

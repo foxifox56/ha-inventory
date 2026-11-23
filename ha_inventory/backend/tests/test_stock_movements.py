@@ -42,6 +42,16 @@ class StockMovementTests(unittest.TestCase):
         self.assertEqual(self.inventory.get(self.item["id"])["quantity"], 5)
         self.assertEqual(len(self.movements.list_for_item(self.item["id"])), 2)
 
+    def test_retry_after_lost_success_response_replays_without_a_second_booking(self) -> None:
+        # The first call represents a commit whose HTTP response never reached
+        # the client. Its retry must use that request's original key.
+        committed = self.book("receive", 2, "lost-response-key", source="barcode")
+        retry = self.book("receive", 2, "lost-response-key", source="barcode")
+        self.assertEqual(retry["id"], committed["id"])
+        self.assertTrue(retry["replayed"])
+        self.assertEqual(self.inventory.get(self.item["id"])["quantity"], 6)
+        self.assertEqual(len(self.movements.list_for_item(self.item["id"])), 1)
+
     def test_idempotency_key_cannot_be_reused_for_another_booking(self) -> None:
         self.book("receive", 1, "same")
         with self.assertRaises(InventoryError) as raised:
@@ -108,6 +118,73 @@ class StockMovementTests(unittest.TestCase):
         self.assertEqual(restored["tracking_mode"], "inventory")
         with self.assertRaises(InventoryError):
             self.movements.undo(initial["id"], {"idempotency_key": "undo-initial-again"})
+
+    def test_confirmed_zero_is_a_known_baseline_and_can_be_undone(self) -> None:
+        unknown = self.inventory.create({"name": "Leerer Behälter", "tracking_mode": "inventory"})
+        initial = self.movements.book(unknown["id"], {
+            "action": "initialize", "quantity": 0, "tracking_mode": "exact",
+            "idempotency_key": "zero-initial", "confirm_initial_stock": True,
+        })
+        item = self.inventory.get(unknown["id"])
+        self.assertEqual((item["quantity"], item["stock_status"], item["tracking_mode"]), (0, "known", "exact"))
+        self.assertEqual(initial["delta_quantity"], 0)
+        with self.assertRaises(InventoryError):
+            self.movements.book(unknown["id"], {
+                "action": "consume", "quantity": 1, "idempotency_key": "zero-consume",
+            })
+        with self.assertRaises(InventoryError):
+            self.movements.book(unknown["id"], {
+                "action": "receive", "quantity": 0, "idempotency_key": "zero-receive",
+            })
+
+        receive = self.movements.book(unknown["id"], {
+            "action": "receive", "quantity": 1, "idempotency_key": "from-zero",
+        })
+        self.movements.undo(receive["id"], {"idempotency_key": "undo-from-zero"})
+        undone = self.movements.undo(initial["id"], {"idempotency_key": "undo-zero-initial"})
+        self.assertEqual(undone["delta_quantity"], 0)
+        restored = self.inventory.get(unknown["id"])
+        self.assertIsNone(restored["quantity"])
+        self.assertEqual(restored["stock_status"], "unknown")
+        self.assertEqual(restored["tracking_mode"], "inventory")
+
+    def test_initial_stock_undo_rejects_live_later_movements_with_zero_net_delta(self) -> None:
+        unknown = self.inventory.create({"name": "Bohnen", "tracking_mode": "inventory"})
+        initial = self.movements.book(unknown["id"], {
+            "action": "initialize", "quantity": 3, "tracking_mode": "exact",
+            "idempotency_key": "live-initial", "confirm_initial_stock": True,
+        })
+        self.movements.book(unknown["id"], {"action": "receive", "quantity": 2, "idempotency_key": "live-receive"})
+        self.movements.book(unknown["id"], {"action": "consume", "quantity": 2, "idempotency_key": "live-consume"})
+        self.assertEqual(self.inventory.get(unknown["id"])["quantity"], 3)
+        with self.assertRaises(InventoryError) as raised:
+            self.movements.undo(initial["id"], {"idempotency_key": "live-undo-initial"})
+        self.assertEqual(raised.exception.status_code, 409)
+        self.assertEqual(self.inventory.get(unknown["id"])["quantity"], 3)
+
+    def test_initial_stock_undo_allows_fully_reversed_later_movements_and_reinitialization(self) -> None:
+        unknown = self.inventory.create({"name": "Linsen", "tracking_mode": "inventory"})
+        initial = self.movements.book(unknown["id"], {
+            "action": "initialize", "quantity": 3, "tracking_mode": "exact",
+            "idempotency_key": "reversed-initial", "confirm_initial_stock": True,
+        })
+        receive = self.movements.book(unknown["id"], {
+            "action": "receive", "quantity": 2, "idempotency_key": "reversed-receive",
+        })
+        consume = self.movements.book(unknown["id"], {
+            "action": "consume", "quantity": 1, "idempotency_key": "reversed-consume",
+        })
+        self.movements.undo(consume["id"], {"idempotency_key": "reversed-undo-consume"})
+        self.movements.undo(receive["id"], {"idempotency_key": "reversed-undo-receive"})
+        self.assertEqual(self.inventory.get(unknown["id"])["quantity"], 3)
+        self.movements.undo(initial["id"], {"idempotency_key": "reversed-undo-initial"})
+        self.assertIsNone(self.inventory.get(unknown["id"])["quantity"])
+        next_initial = self.movements.book(unknown["id"], {
+            "action": "initialize", "quantity": 4, "tracking_mode": "inventory",
+            "idempotency_key": "reinitialize", "confirm_initial_stock": True,
+        })
+        self.assertEqual(next_initial["quantity_after"], 4)
+        self.assertEqual(self.inventory.get(unknown["id"])["quantity"], 4)
 
     def test_undo_is_exactly_once_and_never_creates_negative_stock(self) -> None:
         receive = self.book("receive", 2, "receive-1")

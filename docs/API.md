@@ -53,23 +53,25 @@ The extra write session is a same-origin, cross-site-request protection layer on
 
 Every movement request is handled by `StockMovementService` inside a SQLite `BEGIN IMMEDIATE` transaction. Item quantity/status and the corresponding immutable history row commit together. This serializes concurrent scans and prevents two requests from consuming the same last unit. The movement table has a unique idempotency key; reuse with the same payload returns the original result, while reuse with another payload returns `409`.
 
-`POST /api/v1/items/{id}/movements` accepts a positive whole-package count (the package-size metadata is not a multiplier):
+`POST /api/v1/items/{id}/movements` uses whole-package counts (the package-size metadata is not a multiplier):
 
 ```json
 {"action":"consume","quantity":1,"source":"barcode","idempotency_key":"unique-per-scan"}
 ```
 
-`action` is `receive`, `consume`, or `initialize`. Receipts and consumption require a known numeric (`inventory` or `exact`) stock count. A simple/unknown count returns `409` until a user explicitly establishes a baseline, for example:
+`action` is `receive`, `consume`, or `initialize`. Receipts and consumption require a known numeric (`inventory` or `exact`) stock count and a positive whole package count. A simple/unknown count returns `409` until a user explicitly establishes a baseline, for example:
 
 ```json
 {"action":"initialize","quantity":6,"tracking_mode":"exact","confirm_initial_stock":true,"source":"barcode","idempotency_key":"unique-baseline"}
 ```
 
+Initialization accepts a non-negative whole count, including `0`. A confirmed zero is represented as `stock_status: "known"` and `quantity: 0`; it is distinct from an unknown `null` count. The movement ledger records a zero delta only for initialization and the matching undo. Receive and consume requests with quantity zero remain invalid.
+
 Consumption that would take stock below zero returns `409` and does not write either the item update or a movement. Requests require a unique `idempotency_key` (1–128 characters). `source` is a short label such as `barcode` or `manual`; optional `note` is limited to 500 characters.
 
 `POST /api/v1/items` may set an initial count as part of explicitly creating a new item; that value is its starting state, not a receive movement. In the scanner's `Einlagern` flow the new item is first saved with unknown stock and the user confirms a separate `initialize` movement, so that scanned start count appears in history. After creation, changing an existing numeric quantity through `PATCH` is rejected.
 
-Undo accepts a new idempotency key and optional source/note. It is allowed once per original movement and is recorded with `action: "undo"`, inverse signed delta, and `undo_of_movement_id`. It is rejected if reversing the movement would produce a negative stock. An initial-stock baseline can be undone after later movements have first been balanced/reversed; this restores the prior unknown status. No endpoint silently initializes stock or interprets a product's `product_size` as count.
+Undo accepts an idempotency key and optional source/note. Clients must retain the same key when retrying an unresolved request after an uncertain network failure; the key can be reused only with the same request content. Undo is allowed once per original movement and is recorded with `action: "undo"`, inverse signed delta, and `undo_of_movement_id`. It is rejected if reversing the movement would produce a negative stock. An initial-stock baseline can be undone only after every later effective movement has itself been undone; a zero-net sum by itself is not sufficient. This restores the prior unknown status. No endpoint silently initializes stock or interprets a product's `product_size` as count.
 
 Errors return a JSON object such as `{"error":"...","field":"name"}` and an appropriate HTTP status. Duplicate barcodes return `409`; validation errors return `400`; missing items return `404`; writes without a valid session return `403`.
 

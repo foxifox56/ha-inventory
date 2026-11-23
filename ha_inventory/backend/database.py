@@ -6,7 +6,7 @@ import sqlite3
 from pathlib import Path
 
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 class Database:
@@ -199,6 +199,67 @@ class Database:
                         "VALUES (5, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))"
                     )
                 current = 5
+
+            if current < 6:
+                # A confirmed zero baseline is meaningful (known/0), so the
+                # movement ledger must allow a zero delta for initialization
+                # and its inverse. Rebuild only the journal table; item rows
+                # and all existing movement IDs/keys remain untouched.
+                connection.execute("PRAGMA foreign_keys = OFF")
+                with connection:
+                    connection.execute(
+                        """CREATE TABLE stock_movements_v6 (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            item_id INTEGER NOT NULL REFERENCES inventory_items(id)
+                                ON DELETE RESTRICT,
+                            action TEXT NOT NULL CHECK(action IN ('receive', 'consume', 'initialize', 'undo')),
+                            source TEXT NOT NULL DEFAULT 'manual',
+                            delta_quantity INTEGER NOT NULL
+                                CHECK(delta_quantity != 0 OR action = 'initialize'
+                                  OR (action = 'undo' AND undo_of_movement_id IS NOT NULL)),
+                            quantity_before REAL CHECK(quantity_before IS NULL OR quantity_before >= 0),
+                            quantity_after REAL CHECK(quantity_after IS NULL OR quantity_after >= 0),
+                            tracking_mode_before TEXT NOT NULL
+                                CHECK(tracking_mode_before IN ('simple', 'inventory', 'exact')),
+                            tracking_mode_after TEXT NOT NULL
+                                CHECK(tracking_mode_after IN ('simple', 'inventory', 'exact')),
+                            stock_status_before TEXT NOT NULL
+                                CHECK(stock_status_before IN ('unknown', 'present', 'out_of_stock', 'known')),
+                            stock_status_after TEXT NOT NULL
+                                CHECK(stock_status_after IN ('unknown', 'present', 'out_of_stock', 'known')),
+                            idempotency_key TEXT NOT NULL UNIQUE,
+                            undo_of_movement_id INTEGER UNIQUE REFERENCES stock_movements_v6(id),
+                            created_at TEXT NOT NULL,
+                            note TEXT NOT NULL DEFAULT ''
+                        )"""
+                    )
+                    connection.execute(
+                        """INSERT INTO stock_movements_v6 (
+                            id, item_id, action, source, delta_quantity, quantity_before,
+                            quantity_after, tracking_mode_before, tracking_mode_after,
+                            stock_status_before, stock_status_after, idempotency_key,
+                            undo_of_movement_id, created_at, note
+                        ) SELECT id, item_id, action, source, delta_quantity, quantity_before,
+                            quantity_after, tracking_mode_before, tracking_mode_after,
+                            stock_status_before, stock_status_after, idempotency_key,
+                            undo_of_movement_id, created_at, note
+                        FROM stock_movements"""
+                    )
+                    connection.execute("DROP TABLE stock_movements")
+                    connection.execute("ALTER TABLE stock_movements_v6 RENAME TO stock_movements")
+                    connection.execute(
+                        "CREATE INDEX stock_movements_item_created_idx "
+                        "ON stock_movements(item_id, id DESC)"
+                    )
+                    connection.execute(
+                        "INSERT INTO schema_migrations(version, applied_at) "
+                        "VALUES (6, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))"
+                    )
+                connection.execute("PRAGMA foreign_keys = ON")
+                violations = connection.execute("PRAGMA foreign_key_check").fetchall()
+                if violations:
+                    raise RuntimeError("Foreign-key violations found during schema migration 6.")
+                current = 6
 
             if current != SCHEMA_VERSION:
                 raise RuntimeError(
