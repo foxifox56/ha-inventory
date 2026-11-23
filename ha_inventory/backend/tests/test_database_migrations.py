@@ -52,6 +52,43 @@ class DatabaseMigrationTests(unittest.TestCase):
         finally:
             connection.close()
 
+    def test_v4_to_v5_adds_history_without_changing_existing_item_data(self) -> None:
+        database = Database(self.data_dir)
+        database.initialize()
+        service = InventoryService(InventoryRepository(database))
+        item = service.create({
+            "name": "Milch", "barcode": "000123", "category": "Lebensmittel",
+            "tracking_mode": "exact", "quantity": 2, "location": "Küche",
+            "brand": "Beispiel", "product_size": "1 l", "notes": "Altbestand",
+        })
+        connection = database.connect()
+        try:
+            connection.execute("DROP TABLE stock_movements")
+            connection.execute("DELETE FROM schema_migrations WHERE version = 5")
+            connection.commit()
+        finally:
+            connection.close()
+
+        database.initialize()
+        migrated = InventoryService(InventoryRepository(database)).get(item["id"])
+        self.assertEqual(migrated["id"], item["id"])
+        self.assertEqual(migrated["barcode"], "000123")
+        self.assertEqual(migrated["quantity"], 2)
+        self.assertEqual(migrated["tracking_mode"], "exact")
+        self.assertEqual(migrated["location"], "Küche")
+        self.assertEqual(migrated["brand"], "Beispiel")
+        self.assertEqual(migrated["notes"], "Altbestand")
+        connection = database.connect()
+        try:
+            self.assertIsNotNone(connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='stock_movements'"
+            ).fetchone())
+            self.assertEqual(connection.execute(
+                "SELECT MAX(version) FROM schema_migrations"
+            ).fetchone()[0], SCHEMA_VERSION)
+        finally:
+            connection.close()
+
     def test_v1_migration_marks_ambiguous_old_quantity_as_unknown(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(self.data_dir / "inventory.sqlite3")

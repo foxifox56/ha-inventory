@@ -58,4 +58,4 @@ start_app >/dev/null
 proxy_request 172.30.32.2 wait
 proxy_request 172.30.32.2 read
 
-echo "Container checks passed${platform:+ for $platform}: build, startup, ingress, and /data persistence."
+echo "Container checks passed${platform:+ for $platform}: build, startup, ingress, idempotent stock booking, undo, history, and /data persistence."

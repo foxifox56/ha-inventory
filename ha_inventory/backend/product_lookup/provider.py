@@ -59,8 +59,15 @@ class ProductLookupRateLimited(ProductLookupUnavailable):
         retry_after_seconds: float = DEFAULT_MIN_REQUEST_INTERVAL_SECONDS,
     ):
         super().__init__(message)
-        delay = float(retry_after_seconds)
-        self.retry_after_seconds = max(0.05, delay) if math.isfinite(delay) else DEFAULT_MIN_REQUEST_INTERVAL_SECONDS
+        try:
+            delay = float(retry_after_seconds)
+        except (TypeError, ValueError):
+            delay = DEFAULT_MIN_REQUEST_INTERVAL_SECONDS
+        self.retry_after_seconds = (
+            max(0.05, delay)
+            if math.isfinite(delay)
+            else DEFAULT_MIN_REQUEST_INTERVAL_SECONDS
+        )
 
 
 @dataclass(frozen=True)
@@ -247,7 +254,6 @@ class OpenFactsProvider:
         if cached is not _CACHE_MISS:
             return cached
 
-        now = self._clock()
         with self._request_lock:
             now = self._clock()
             remaining = (
@@ -281,7 +287,7 @@ class OpenFactsProvider:
             url,
             headers={
                 "Accept": "application/json",
-                "User-Agent": "HA-Inventory/0.2 (https://github.com/foxifox56/ha-inventory)",
+                "User-Agent": "HA-Inventory/0.3 (https://github.com/foxifox56/ha-inventory)",
             },
             method="GET",
         )

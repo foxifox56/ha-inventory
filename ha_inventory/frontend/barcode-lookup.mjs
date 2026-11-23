@@ -85,15 +85,15 @@ export async function lookupBarcodeValue(rawBarcode, lookup, handlers, options =
       }
 
       if (result?.status === 'local' && result.item) {
-        handlers.found(result.item);
+        await handlers.found(result.item);
         return { outcome: 'found', item: result.item };
       }
       if (result?.status === 'identified' && result.product) {
-        handlers.identified?.(barcode, result.product);
+        await handlers.identified?.(barcode, result.product);
         return { outcome: 'identified', barcode, product: result.product };
       }
       if (result?.status === 'not_found') {
-        handlers.missing(barcode);
+        await handlers.missing(barcode);
         return { outcome: 'missing', barcode };
       }
       const error = new Error('Die Produktsuche lieferte ein unbekanntes Antwortformat.');

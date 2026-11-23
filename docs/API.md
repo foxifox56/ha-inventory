@@ -17,6 +17,7 @@ All responses are JSON with `Cache-Control: no-store`.
 | `GET /api/v1/categories` | `{"categories":["..."]}` | Current distinct category values. |
 | `GET /api/v1/locations` | `{"locations":["..."]}` | Current non-empty distinct location values. |
 | `GET /api/v1/stock-statuses` | `{"stock_statuses":[{"value":"...","label":"..."}]}` | Status vocabulary for `stock_status`. |
+| `GET /api/v1/items/{id}/movements` | `{"movements":[...]}` | Newest-first durable history; includes `undone_by_movement_id` when reversed. |
 | `GET /api/v1/product-lookup/{barcode}` | One of the product lookup response objects below | Local-first, read-only lookup. Item codes are strings up to 64 characters; numeric codes retain leading zeroes. |
 
 An item contains `id`, `name`, `barcode`, `brand`, `product_size`, `image_url`, `image_license`, `data_source`, `source_url`, `category`, `location`, `tracking_mode`, `stock_status`, `quantity`, `unit`, `minimum_quantity`, `notes`, `created_at`, and `updated_at`. `quantity` is `null` when the amount is unknown; it is never inferred from a barcode. `tracking_mode` is `simple`, `inventory`, or `exact`. Status is `unknown`, `present`, `out_of_stock`, or `known`.
@@ -25,7 +26,7 @@ An item contains `id`, `name`, `barcode`, `brand`, `product_size`, `image_url`, 
 
 The endpoint checks SQLite before making any remote request. An existing local item code, numeric or alphanumeric, returns `200 {"status":"local","barcode":"...","item":{...}}`. For an unknown numeric code, a recognized external product returns `200 {"status":"identified","barcode":"...","product":{...}}`; the suggestion includes `name`, `brand`, `product_size`, `category`, `image_url`, `image_license`, `data_source`, and `source_url`. An unknown alphanumeric code, or an external miss, returns `200 {"status":"not_found","barcode":"..."}` and does not contact Open Facts. Invalid or overlong codes return `400`.
 
-An app-local Open Facts throttle or upstream HTTP 429 returns `429` with `code: "product_lookup_rate_limited"`, `status: "rate_limited"`, and `retry_after_seconds`; the response also includes the standard `Retry-After` header. The browser waits for at most two retries and no more than 12 seconds total, and that wait can be cancelled in favor of manual entry. Provider downtime, timeout, or invalid provider data returns `503 {"status":"unavailable", ...}`. Ingress access failures remain `403`. The backend does not wait in a queue or sleep for a future request slot.
+An app-local Open Facts throttle or upstream HTTP 429 returns `429` with `code: "product_lookup_rate_limited"`, `status: "rate_limited"`, and `retry_after_seconds`; the response also includes the standard `Retry-After` header. The browser waits for at most two retries and no more than 12 seconds combined for rate-limit delays; each actual provider call has its own five-second timeout. The wait can be cancelled in favor of manual entry. Provider downtime, timeout, or invalid provider data returns `503 {"status":"unavailable", ...}`. Ingress access failures remain `403`. The backend does not wait in a queue or sleep for a future request slot.
 
 This is a read-only endpoint. It never creates an item and never changes location, stock status, quantity, or any other database field. A client may prefill an editable form with `product`, but must wait for a user-confirmed `POST /api/v1/items` before persisting. The UI keeps its safe default stock state (`simple` / `unknown` / `null`); the user may choose a location and tracking mode before saving.
 
@@ -41,10 +42,34 @@ Mutations require both the Ingress authenticated request and a short-lived write
 | Method and path | Response | Effect |
 | --- | --- | --- |
 | `POST /api/v1/items` | `201 {"item":{...}}` | Creates an item. |
-| `PATCH /api/v1/items/{id}` | `200 {"item":{...}}` | Updates only submitted fields. Stock changes only when its fields are explicitly submitted. |
-| `DELETE /api/v1/items/{id}` | `200 {"deleted":true}` | Deletes the selected item. |
+| `PATCH /api/v1/items/{id}` | `200 {"item":{...}}` | Updates submitted fields. A changed numeric quantity is rejected; use a movement. |
+| `POST /api/v1/items/{id}/movements` | `201 {"movement":{...}}` or `200` for replay | Books a receipt, consumption, or explicitly confirmed initial stock. |
+| `POST /api/v1/movements/{movement_id}/undo` | `201 {"movement":{...}}` or `200` for replay | Writes one counter-movement; it never deletes or edits the original record. |
+| `DELETE /api/v1/items/{id}` | `200 {"deleted":true}` | Deletes an item with no movement history. History-bearing items return `409` so audit rows remain attached. |
 
 The extra write session is a same-origin, cross-site-request protection layer on top of Home Assistant authentication. It does **not** create separate Home Assistant user roles or authorize clients outside Ingress. Do not treat it as an API key. An expired or invalid session returns `403` with `code: "write_session_invalid"`; the browser client refreshes and retries the mutation once. Other `403` responses (for example `code: "ingress_required"`) are surfaced without retry. Direct client access, cross-origin access, bearer-token authentication, or an integration bypassing Ingress are not implemented. These require a separately reviewed authentication design before enabling an external integration.
+
+### Booking a stock movement
+
+Every movement request is handled by `StockMovementService` inside a SQLite `BEGIN IMMEDIATE` transaction. Item quantity/status and the corresponding immutable history row commit together. This serializes concurrent scans and prevents two requests from consuming the same last unit. The movement table has a unique idempotency key; reuse with the same payload returns the original result, while reuse with another payload returns `409`.
+
+`POST /api/v1/items/{id}/movements` accepts a positive whole-package count (the package-size metadata is not a multiplier):
+
+```json
+{"action":"consume","quantity":1,"source":"barcode","idempotency_key":"unique-per-scan"}
+```
+
+`action` is `receive`, `consume`, or `initialize`. Receipts and consumption require a known numeric (`inventory` or `exact`) stock count. A simple/unknown count returns `409` until a user explicitly establishes a baseline, for example:
+
+```json
+{"action":"initialize","quantity":6,"tracking_mode":"exact","confirm_initial_stock":true,"source":"barcode","idempotency_key":"unique-baseline"}
+```
+
+Consumption that would take stock below zero returns `409` and does not write either the item update or a movement. Requests require a unique `idempotency_key` (1–128 characters). `source` is a short label such as `barcode` or `manual`; optional `note` is limited to 500 characters.
+
+`POST /api/v1/items` may set an initial count as part of explicitly creating a new item; that value is its starting state, not a receive movement. In the scanner's `Einlagern` flow the new item is first saved with unknown stock and the user confirms a separate `initialize` movement, so that scanned start count appears in history. After creation, changing an existing numeric quantity through `PATCH` is rejected.
+
+Undo accepts a new idempotency key and optional source/note. It is allowed once per original movement and is recorded with `action: "undo"`, inverse signed delta, and `undo_of_movement_id`. It is rejected if reversing the movement would produce a negative stock. An initial-stock baseline can be undone after later movements have first been balanced/reversed; this restores the prior unknown status. No endpoint silently initializes stock or interprets a product's `product_size` as count.
 
 Errors return a JSON object such as `{"error":"...","field":"name"}` and an appropriate HTTP status. Duplicate barcodes return `409`; validation errors return `400`; missing items return `404`; writes without a valid session return `403`.
 

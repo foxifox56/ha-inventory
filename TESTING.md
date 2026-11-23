@@ -1,65 +1,50 @@
 # Testprotokoll
 
-Stand: 23.11.2026, Branch `development/v0.2`. Automatisierte Prüfungen verwenden ausschließlich temporäre SQLite-Datenbanken und gemockte Provider-Antworten. Es werden keine Produktdaten von Open Facts während Tests angefragt.
+Stand: 23.11.2026 · Branch `development/v0.3`. Automatisierte Tests verwenden temporäre SQLite-Datenbanken sowie gemockte Provider-Antworten. Es werden keine Live-Produktdaten bei Open Facts angefragt.
 
 ## Automatisierte Prüfungen
 
-| Prüfung | Umfang |
+| Prüfung | Umfang und Ergebnis |
 | --- | --- |
-| Backend-Unit-, Migrations- und HTTP-Tests | API v1, Ingress, lokale Treffer, Anbieter-Fallback, Metadatenvalidierung, Fehler, Schreibschutz und Datenbankpersistenz |
-| Provider-Tests | vier Open-Facts-Produktarten, benutzerdefinierter Folgeprovider, optionale Felder/Bilder, führende Nullen, alphanumerische lokale Codes, ungültige JSON-/HTTP-Antworten, Timeouts, Retry-After, Cache und Redirect-Allowlist |
-| Frontend-Tests | numerische und alphanumerische Codes, Formularvorschläge, mehrere Rate-Limit-Retries, abbrechbare Wartezeit, manuelle Alternative und Bestandsschutz |
-| API-Client-Tests | abgelaufenes Token genau einmal erneuern; `403` von Ingress nicht als Tokenablauf behandeln; keine endlose Wiederholung |
-| Migrationstests | v1-Altbestand und v3-Bestand: IDs, Barcodes, Notizen und bestätigte Mengen bleiben bei der additiven v4-Migration erhalten |
-| Python/JavaScript-Syntax | `compileall` sowie `node --check` für App und Laufzeitmodule |
-| Lokale Ergebniszahlen | 43 Backendtests und 25 Frontendtests bestanden; YAML von App, Repository und Actions geparst |
-| Docker lokal | Nicht ausführbar: Docker-CLI ist in dieser Umgebung nicht installiert |
-| Docker-Smoke-Tests | Containerstart, Ingress/API, Schreibsitzung und persistente `/data`-Daten auf AMD64 und ARM64 (GitHub Actions) |
+| Backendtests | 54 Tests bestanden: v1-API, Ingress und Schreibsitzung, Produkt-Lookup, Bewegungsservice, Idempotenz, parallele Scans, negativer Bestand, Startbestand, Undo und Fehlerbehandlung |
+| Frontendtests | 30 Tests bestanden: Produkt-Lookup, Bestandsschutz, Scan-Modi, Mengenrouting, kurze Doppelscan-Sperre, Idempotenzschlüssel, Buchungspayloads und Kameraadapter |
+| Rückwärtskompatibilität | v1-/v3-Altstände und der v4→v5-Upgradepfad; IDs, Barcodes, Metadaten und Mengen bleiben erhalten |
+| Syntax | `compileall` und `node --check` für App, API-Client, Produkt-Lookup, Scanner, Navigations- und Buchungsmodule bestanden |
+| Home-Assistant-App-Konfiguration | YAML erfolgreich gelesen; Version `0.3.0`, Architekturen `aarch64`/`amd64`, `backup: cold` |
+| Docker lokal | Nicht ausgeführt: Docker-CLI ist in der Entwicklungsumgebung nicht verfügbar |
+| Docker-Smoke-Test in GitHub Actions | Wird für `linux/amd64` und `linux/arm64` nach Branch-Push und PR-Erstellung ausgeführt; der Container-Test bucht, wiederholt idempotent, macht rückgängig und prüft den Verlauf nach Neustart |
+| GitHub Actions Ergebnis | Wird nach dem Branch-Push und PR-Lauf mit den tatsächlichen Workflow-Links ergänzt |
 
-Aus `ha_inventory/` ausführen:
+Befehle aus `ha_inventory/`:
 
 ```bash
 python3 -m unittest discover -s backend/tests -v
 node --test frontend/tests/*.test.mjs
 python3 -m compileall -q backend
-node --check frontend/app.js
-node --check frontend/api-client.mjs
-node --check frontend/product-prefill.mjs
-node --check frontend/barcode-lookup.mjs
-node --check frontend/mobile-navigation.mjs
-node --check frontend/zxing-scanner.mjs
-node --check frontend/vendor/zxing-browser.mjs
+for file in frontend/*.js frontend/*.mjs frontend/vendor/*.mjs; do node --check "$file" || exit 1; done
 ```
 
-Der Docker-Smoke-Test wird aus dem Repository-Root gestartet:
+GitHub Actions führt die Backend- und Frontendtests sowie den Container-Smoke-Test für `linux/amd64` und `linux/arm64` aus. Ein ARM64-Container-Test ist kein Supervisor- oder Raspberry-Pi-Hardwaretest.
 
-```bash
-bash scripts/container-smoke.sh
-INVENTORY_SMOKE_PLATFORM=linux/arm64 bash scripts/container-smoke.sh
-```
+## Manuelle Testanleitung: iPhone über Ingress und Nabu Casa
 
-Der aktuelle Review-Korrekturstand bestand im PR-Workflow [#20](https://github.com/foxifox56/ha-inventory/actions/runs/45204403049) und Push-Workflow [#19](https://github.com/foxifox56/ha-inventory/actions/runs/45204386926). Beide liefen erfolgreich: Backend- und Frontendtests sowie Docker-Build und Smoke-Test für AMD64 und ARM64. Der lokale Docker-Smoke-Test war nicht verfügbar, da die Docker-CLI in dieser Entwicklungsumgebung nicht installiert ist.
+Der echte iPhone-Kameratest wurde in dieser Entwicklungsrunde **nicht durchgeführt**. Hierfür ist ein separates Home-Assistant-Testsystem mit Ingress-Zugriff und ein iPhone erforderlich. Keine Add-on-IP, keinen Port und keine direkte App-URL öffnen.
 
-## Manueller Ende-zu-Ende-Test auf einem iPhone
+1. Auf dem iPhone in Home Assistant anmelden. Im Heim-WLAN die eigene HTTPS-Adresse von Home Assistant, außerhalb des Hauses die Nabu-Casa-Remote-URL verwenden. HA Inventory über **Einstellungen → Apps → HA Inventory → Öffnen** starten, damit HA-Anmeldung und Ingress erhalten bleiben.
+2. Scanner öffnen. Prüfen, dass **Ansehen** vorausgewählt ist. Einen gespeicherten numerischen Barcode und einen alphanumerischen Code scannen. Derselbe Artikel muss erscheinen; Menge, Status und Lagerort müssen unverändert bleiben.
+3. Einen unbekannten numerischen Barcode scannen. Produktvorschläge prüfen, Felder ändern und abbrechen: Es darf kein Artikel entstehen. Bei nicht verfügbarem Open Facts müssen Fehlermeldung, erneuter Versuch und manuelle Alternative funktionieren.
+4. Einen unbekannten alphanumerischen Code scannen. Er muss ohne externen Produktaufruf im vorausgefüllten manuellen Formular erscheinen. Abbrechen darf nichts speichern.
+5. Für einen vorhandenen Artikel **Einlagern** wählen, 1 und danach mehrere Packungen testen. Die Kamera öffnet nach einem Treffer nicht erneut automatisch. Vor Bestätigung darf sich der Bestand nicht ändern; nach Bestätigung muss genau die gewählte ganze Packungszahl hinzukommen.
+6. Für einen Artikel mit unbekanntem/einfachem Bestand **Einlagern** testen. Ohne Bestätigung des Startbestands muss die Buchung scheitern. Mit Bestätigung und gewähltem Bestandsmodell muss ein Verlaufseintrag entstehen.
+7. **Verbrauchen** ausdrücklich aktivieren. Ohne Mengenänderung muss ein Scan eine Packung abziehen; mit gewählter Mehrfachmenge muss genau diese Zahl abgehen. Eine Abbuchung über den Bestand hinaus wird abgelehnt und darf die Daten nicht ändern.
+8. Nach Einlagerung und Verbrauch **Rückgängig** verwenden. Der Verlauf muss Original und Gegenbuchung zeigen; wiederholtes Undo muss abgelehnt werden. Wiederholtes Kamerabild vor erneutem Öffnen darf keine Doppelbuchung auslösen.
+9. Eine abgelaufene Schreibsitzung über eine normale Buchung prüfen. Die App muss die Schreibsitzung einmal erneuern; Ingress-Fehler dürfen nicht als Tokenablauf wiederholt werden.
+10. App neu starten und Artikel sowie Buchungsverlauf kontrollieren. Der Bestand muss erhalten bleiben.
 
-Dieser Test wurde in dieser Entwicklungsumgebung nicht ausgeführt. Er benötigt ein iPhone, eine separat eingerichtete Home-Assistant-Testinstanz und Zugriff über HTTPS. Er kann im Heim-WLAN über die HTTPS-URL von Home Assistant oder außerhalb des Hauses über die Nabu Casa Remote URL erfolgen. Beide Wege müssen HA-Login und den App-Ingress-Kontext verwenden; nicht direkt auf Add-on-IP oder -Port zugreifen.
+## Grenzen und nicht durchgeführte Prüfungen
 
-1. In der Home-Assistant-App auf dem iPhone anmelden. Im Heim-WLAN die lokale HTTPS-URL oder außerhalb des Hauses die Nabu Casa Remote URL öffnen. Danach HA Inventory über **Einstellungen → Apps → HA Inventory → Öffnen** aufrufen. Nicht über Add-on-IP, Port oder eine direkte App-URL starten.
-2. Scanner antippen und Kamerazugriff erteilen. Rückkamera prüfen. Safari beziehungsweise der Home-Assistant-In-App-Browser muss HTTPS, Anmeldung und Ingress-Sitzung beibehalten.
-3. Einen bereits gespeicherten numerischen Artikelcode und einen alphanumerischen Code wie `TOOL-001` scannen. Beide müssen denselben vorhandenen Datensatz öffnen. Menge, Status und Lagerort vorher/nachher vergleichen.
-4. Einen unbekannten alphanumerischen Code scannen und anschließend manuell eingeben. Beide Male muss die manuelle Artikelerfassung mit unverändertem Code öffnen, ohne Open Facts aufzurufen.
-5. Einen bekannten Open-Facts-Testbarcode scannen, der lokal nicht existiert. Ladeanzeige prüfen; falls erkannt, Name, Marke, Packungsgröße, Kategorie, Bild, Quelle und Bildlizenz prüfen. Felder editieren und Lagerort/Bestandsmodell wählen. Vor „Artikel speichern“ darf kein Datensatz in der Lagerübersicht erscheinen.
-6. Drei unterschiedliche, lokal unbekannte numerische Barcodes direkt nacheinander scannen. Bei Rate-Limit muss eine verständliche Warteanzeige mit automatischem begrenztem Retry erscheinen. Währenddessen „Manuell erfassen“ antippen: Warte-Retry muss abbrechen und das Formular sofort mit dem Barcode öffnen.
-7. Formular abbrechen, denselben Barcode erneut scannen und prüfen, dass kein Artikel angelegt wurde. Danach bewusst einmal speichern; genau ein Datensatz muss erscheinen. Doppeltippen auf Speichern darf keine zweite Anlage erzeugen.
-8. Offlinezugriff beziehungsweise einen Provider-Timeout testen. Fehlermeldung, „Erneut versuchen“ und manuelle Erfassung prüfen. Bei wiederholtem Scan eines gespeicherten Codes müssen immer dieselben Artikel-ID und Bestandswerte erscheinen.
-9. Bei laufender Kamera den Dialog schließen. Kameraindikator muss erlöschen. Ein Scan darf niemals Menge, Bestandsstatus oder Lagerort ändern.
-
-Für externe Produkterkennung braucht der App-Container eine Internetverbindung zu den Open-Facts-HTTPS-APIs. Die Kataloge sind freiwillig gepflegt; Treffer, Kategorien und Bilder können fehlen, veraltet, falsch oder durch upstream Rate-Limits zeitweise nicht verfügbar sein. In diesen Fällen werden Lookupfehler nicht gespeichert und kein Bestand verändert; der Nutzer kann begrenzt erneut versuchen oder manuell fortfahren. Automatisierte Tests verwenden ausschließlich Provider-Mocks. Ein Live-Open-Facts-Test wurde in dieser Entwicklungsrunde **nicht durchgeführt**.
-
-## Noch offene Hardware-/Supervisor-Checks
-
-- iPhone-Kamera und iOS-/Ingress-/Nabu-Casa-Verhalten: manuell nach obiger Liste offen; automatisierte ZXing-Tests verwenden Kamera-Mocks.
-- Home Assistant OS auf Raspberry Pi 4 `rpi4-64` / `aarch64`: ARM64 Docker-Build und Smoke-Test sind nur ein CI-Nachweis, kein Supervisor- oder Pi-Test.
-- Supervisor-Backup/Restore beim Wechsel zwischen Repository-URLs/Branches mit unterschiedlicher App-ID: nicht auf Hardware ausgeführt. Vollständiges HA-Backup vor einem Upgrade erstellen; Branch-Wechsel kann ein separates `/data`-Verzeichnis bedeuten.
-- PWA, Offline-Betrieb der App und eigenständiger Homescreen-Zugang: nicht implementiert. Produktsuche funktioniert offline nicht, aber manuelle Artikelerfassung bleibt verfügbar.
-- Produktions-Home-Assistant und Raspberry Pi: nicht verändert; es wurde keine Installation vorgenommen.
+- Live-Abfragen bei Open Facts: **nicht durchgeführt**. Provider-Verhalten wurde mit Mocks getestet; echte Rate-Limits, Netzwerkausfälle und Datenqualität hängen vom Anbieter ab.
+- iPhone-Kamera, Safari/In-App-Browser, Home-Assistant-Ingress und Nabu Casa: **nicht durchgeführt**.
+- Installation, Supervisor-Upgrade/Backup und Raspberry Pi 4 mit HAOS 64-bit: **nicht durchgeführt**. Es wurden keine Änderungen am produktiven Home Assistant oder Raspberry Pi vorgenommen.
+- Lokaler Docker-Smoke-Test: **nicht durchgeführt**, weil Docker hier fehlt. AMD64-/ARM64-Smoke-Ergebnisse werden nach GitHub Actions ergänzt.
+- Bewegungen zählen positive ganze Packungen. Produktgrößen wie `1 l` sind keine Mengenumrechnung. Unbekannte Bestände müssen zuerst ausdrücklich initialisiert werden. Beleg-OCR, Offline-PWA und direkte externe API-Zugänge sind nicht Teil von v0.3.

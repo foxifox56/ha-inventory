@@ -80,11 +80,11 @@ class HttpApiTests(unittest.TestCase):
         status, updated, _ = self.request(
             f"/api/v1/items/{item_id}",
             "PATCH",
-            {"tracking_mode": "exact", "quantity": 4, "stock_status": "known"},
+            {"location": "Vorratsschrank"},
             write_headers,
         )
         self.assertEqual(status, 200)
-        self.assertEqual(updated["item"]["quantity"], 4)
+        self.assertIsNone(updated["item"]["quantity"])
 
         status, deleted, _ = self.request(f"/api/v1/items/{item_id}", "DELETE", headers=write_headers)
         self.assertEqual(status, 200)
@@ -346,6 +346,61 @@ class HttpApiTests(unittest.TestCase):
         self.assertEqual(status, 403)
         self.assertEqual(body["code"], "write_session_invalid")
         self.assertEqual(self.request("/api/v1/items")[1]["items"], [])
+
+    def test_movement_api_requires_ingress_write_session_and_returns_history(self) -> None:
+        _, session, _ = self.request("/api/v1/write-session")
+        headers = {"X-HA-Inventory-Write-Token": session["write_token"]}
+        status, created, _ = self.request(
+            "/api/v1/items", "POST",
+            {"name": "Milch", "barcode": "000123", "tracking_mode": "exact", "quantity": 2},
+            headers,
+        )
+        item_id = created["item"]["id"]
+        payload = {"action": "receive", "quantity": 2, "idempotency_key": "http-book-1"}
+        self.assertEqual(self.request(f"/api/v1/items/{item_id}/movements", "POST", payload)[0], 403)
+        status, booked, _ = self.request(
+            f"/api/v1/items/{item_id}/movements", "POST", payload, headers
+        )
+        self.assertEqual(status, 201)
+        self.assertEqual(booked["movement"]["quantity_after"], 4)
+        handler = self.server.RequestHandlerClass
+        handler.require_ingress_proxy = True
+        try:
+            denied_ingress, ingress_body, _ = self.request(
+                f"/api/v1/items/{item_id}/movements", "POST",
+                {"action": "consume", "quantity": 1, "idempotency_key": "direct-path"}, headers,
+            )
+        finally:
+            handler.require_ingress_proxy = False
+        self.assertEqual((denied_ingress, ingress_body["code"]), (403, "ingress_required"))
+        self.assertEqual(self.request(f"/api/v1/items/{item_id}")[1]["item"]["quantity"], 4)
+        status, replayed, _ = self.request(
+            f"/api/v1/items/{item_id}/movements", "POST", payload, headers
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(replayed["movement"]["id"], booked["movement"]["id"])
+        history_status, history, _ = self.request(f"/api/v1/items/{item_id}/movements")
+        self.assertEqual(history_status, 200)
+        self.assertEqual(len(history["movements"]), 1)
+
+        undo_status, undone, _ = self.request(
+            f"/api/v1/movements/{booked['movement']['id']}/undo", "POST",
+            {"idempotency_key": "http-undo-1"}, headers,
+        )
+        self.assertEqual(undo_status, 201)
+        self.assertEqual(undone["movement"]["action"], "undo")
+        history = self.request(f"/api/v1/items/{item_id}/movements")[1]["movements"]
+        original = next(entry for entry in history if entry["id"] == booked["movement"]["id"])
+        self.assertEqual(original["undone_by_movement_id"], undone["movement"]["id"])
+
+        handler.write_tokens[session["write_token"]] = 0
+        denied, body, _ = self.request(
+            f"/api/v1/items/{item_id}/movements", "POST",
+            {"action": "consume", "quantity": 1, "idempotency_key": "expired-book"},
+            {"X-HA-Inventory-Write-Token": session["write_token"]},
+        )
+        self.assertEqual((denied, body["code"]), (403, "write_session_invalid"))
+        self.assertEqual(self.request(f"/api/v1/items/{item_id}")[1]["item"]["quantity"], 2)
 
     def test_database_survives_a_server_restart(self) -> None:
         _, session, _ = self.request("/api/v1/write-session")

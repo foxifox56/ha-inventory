@@ -17,11 +17,13 @@
 - Reads remain read-only. Mutations require the additional short-lived write session as well as Ingress. The write session is not an external API credential or a replacement for Home Assistant authorization.
 - A barcode identifies an inventory item but does not define its identity. Preserve the durable database ID if a barcode is changed or removed.
 - Scan lookup must check SQLite first for any valid stored item code, numeric or alphanumeric. Only unknown numeric codes may go to Open Facts; unknown alphanumeric codes go directly to manual entry.
-- Scanning must never create an item or decrement, increment, or otherwise change stock automatically. Known codes open item details; external matches are editable suggestions and require explicit save.
+- The scanner opens in read-only `Ansehen` mode. Only a deliberate switch to `Verbrauchen` may book the selected unit count on a known numeric item; `Einlagern` always requires a separate confirmation.
 - Product lookup results are suggestions only. An unknown barcode can prefill editable name, brand, pack size, category, and image fields, but only an explicit protected save may create an item. A lookup must never mutate stock.
 - External providers run only on the backend. Require HTTPS, a clear User-Agent, bounded timeouts/response bodies/cache, validated redirects and image/source URLs, and graceful provider failures. Respect provider rate limits without blocking a backend worker; expose retry guidance so the frontend can perform only bounded, cancellable waits and retain a manual fallback. Do not send locations, quantities, or other inventory data to a product provider. Keep provider-specific details out of the UI and SQLite layer.
 - Preserve source attribution and image licensing when external metadata is saved or shown. Treat external data as unverified user-contributed suggestions.
-- Stock changes happen only after a user explicitly saves an item edit. Shopping/to-do completion and future HA events must never alter inventory silently.
+- Stock changes use `StockMovementService`, a transaction, and a unique idempotency key. Never patch a quantity directly. Unknown/simple stock needs an explicit confirmed initialization; consumption may never make a quantity negative. Undo creates one audited counter-movement and cannot repeat.
+- Movement history is durable and keeps its item reference. Items with movement history are not physically deleted. Product pack size is metadata, not a quantity multiplier; booking counts are whole packages.
+- Shopping/to-do completion and future HA events must never alter inventory silently.
 - Represent presence-only, estimated inventory, and exact manual counts as distinct tracking modes. A missing count remains explicitly unknown, never zero or one.
 - Keep product lookup and other remote integrations optional. The app must remain usable without a cloud database or cloud product account.
 - Before enabling a future external client, define least-privilege authentication, revocation, and session handling. Never use direct SQLite access to avoid this work.
@@ -32,7 +34,7 @@
 - Use parameterized SQL, validate all API input, and escape user-provided values before rendering HTML.
 - Preserve leading zeroes in barcodes and treat barcodes as strings.
 - Add a database migration when changing the schema; do not edit existing migrations.
-- Product metadata migrations must be additive and must preserve legacy item IDs, barcodes, notes, locations, and confirmed stock values.
+- Migrations must be additive and must preserve legacy item IDs, barcodes, notes, locations, confirmed stock values, and product metadata. Migration v5 creates only the movement ledger and must not rewrite existing item rows.
 - Use the Python standard library unless an additional dependency has a clear user-facing benefit. Vendor browser dependencies locally, pin the version, and include license notices.
 - Keep the UI mobile-first, retain a usable desktop layout, provide manual barcode entry, honor reduced motion, and support system Dark Mode.
 - A PWA manifest, service worker, standalone metadata, or alternate iPhone auth flow may only be added after `docs/PWA-architecture.md`'s security questions are resolved and documented.
@@ -46,7 +48,7 @@
   node --check frontend/app.js
   ```
 
-- Product lookup tests must cover local-first behavior, all enabled provider types, missing fields/images, network/timeout/schema failures, leading-zero barcodes, cache/rate behavior, and proof that a lookup does not create or alter an item. Frontend tests must cover suggestions, manual fallback, loading and single explicit-save semantics.
+- Product lookup tests must cover local-first behavior, all enabled provider types, missing fields/images, network/timeout/schema failures, leading-zero barcodes, cache/rate behavior, and proof that a lookup does not create or alter an item. Frontend tests must cover suggestions, manual fallback, loading, scanner mode routing, duplicate scan cooldown, booking quantity semantics, and undo affordances. Backend tests must cover idempotency, concurrent consumption, undo, movement history, negative stock protection, and migration v5.
 
 - Update `README.md`, `TESTING.md`, `docs/API.md`, and architecture notes when setup, API behavior, security, or verification changes.
 - Never install or configure this app on the user's production Home Assistant during development. Use local tests or an isolated test environment.
