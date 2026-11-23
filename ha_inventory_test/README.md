@@ -4,4 +4,4 @@ Separat installierbare Test-App für v0.4 mit eigenem Slug `ha-inventory-test` u
 
 **Vor Installation:** [Sicherheits- und Installationshinweise](DOCS.md) lesen. Die reguläre App `ha-inventory` nicht ersetzen oder entfernen.
 
-Entwickler: Laufzeitcode ausschließlich in `ha_inventory/` bearbeiten, anschließend `python scripts/sync-test-app.py --sync` ausführen. CI prüft Bytegleichheit über `--check`. Nur `config.yaml`, `DOCS.md` und `README.md` sind bewusst unterschiedlich.
+Entwickler: Laufzeitcode ausschließlich in `ha_inventory/` bearbeiten, anschließend `python scripts/sync-test-app.py --sync` ausführen. CI prüft Bytegleichheit über `--check`. Nur `config.yaml`, `DOCS.md`, `README.md` sowie das mit Supervisor-Image-Labels versehene Test-`Dockerfile` unterscheiden sich bewusst.

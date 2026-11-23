@@ -71,3 +71,11 @@ Echter iPhone-, Safari-, Home-Assistant-Ingress- und Nabu-Casa-Test: **nicht dur
 - OCR, Händlererkennung und schwache Beleg-Fingerprints sind fehlertolerante Vorschläge. Jede Zeile, Menge und Zuordnung muss geprüft werden. Ein Fingerprint kann ähnliche Einkäufe als möglichen Duplikatfall markieren; die UI verlangt dann eine ausdrückliche Entscheidung.
 - Produktbezeichnungen ohne EAN bleiben manuelle Vorschläge; der Belegimport fragt keine externen Produktdatenbanken ab.
 - Keine automatische Bestandsänderung durch Foto/OCR: nur ein ausdrücklich bestätigter Sammelimport bucht. Wenn irgendeine Importzeile fehlschlägt, wird die gesamte SQLite-Transaktion zurückgerollt. Das gemeinsame Undo wird ebenfalls vollständig ausgeführt oder vollständig abgelehnt.
+
+
+## Getrennte HA-Inventory-Test-App (PR #7)
+
+- Branch `development/v0.4-test-app`, Basis `development/v0.4`: eigenständiger Slug `ha-inventory-test`, eigenes persistentes `/data`, manueller Start, kein externer Port.
+- **Reproduzierbarer statischer Vergleich:** `python scripts/sync-test-app.py --check` prüft, dass alle Backend-/Frontend-/Laufzeitdateien außer Test-Konfiguration/Dokumentation/Docker-Metadaten mit v0.4 übereinstimmen. Das Test-Dockerfile trägt die für lokal gebaute Home-Assistant-Apps empfohlenen Supervisor-Labels (`io.hass.version`, `io.hass.type`, `io.hass.arch`).
+- **CI-Pflicht:** geänderte GitHub Actions bauen den Test-App-Ordner auf AMD64 und ARM64, prüfen die Image-Labels, die vollständigen v0.4-Tests und den bestehenden OCR-/SQLite-/Ingress-Container-Smoke. Ergebnisse der letzten Läufe in GitHub PR #7 nachsehen; ohne grüne CI keine Installationsfreigabe.
+- Keine Prüfung auf realem HAOS/Supervisor/iPhone und keine echte REWE-/Kaufland-OCR in diesem Paketierungsschritt. Installiere nicht automatisch; vor manueller Erprobung vollständiges HA-Backup und nur die Test-App auswählen.
