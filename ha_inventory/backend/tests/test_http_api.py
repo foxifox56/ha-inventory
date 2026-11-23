@@ -402,6 +402,24 @@ class HttpApiTests(unittest.TestCase):
         self.assertEqual((denied, body["code"]), (403, "write_session_invalid"))
         self.assertEqual(self.request(f"/api/v1/items/{item_id}")[1]["item"]["quantity"], 2)
 
+    def test_extremely_large_movement_quantity_returns_validation_error_without_mutation(self) -> None:
+        _, session, _ = self.request("/api/v1/write-session")
+        headers = {"X-HA-Inventory-Write-Token": session["write_token"]}
+        _, created, _ = self.request(
+            "/api/v1/items", "POST",
+            {"name": "Schwerlast", "tracking_mode": "exact", "quantity": 2}, headers,
+        )
+        item_id = created["item"]["id"]
+        status, body, _ = self.request(
+            f"/api/v1/items/{item_id}/movements", "POST",
+            {"action": "receive", "quantity": 1 << 100, "idempotency_key": "http-huge-quantity"},
+            headers,
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(body["field"], "quantity")
+        self.assertEqual(self.request(f"/api/v1/items/{item_id}")[1]["item"]["quantity"], 2)
+        self.assertEqual(self.request(f"/api/v1/items/{item_id}/movements")[1]["movements"], [])
+
     def test_database_survives_a_server_restart(self) -> None:
         _, session, _ = self.request("/api/v1/write-session")
         status, created, _ = self.request(

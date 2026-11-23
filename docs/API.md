@@ -51,7 +51,7 @@ The extra write session is a same-origin, cross-site-request protection layer on
 
 ### Booking a stock movement
 
-Every movement request is handled by `StockMovementService` inside a SQLite `BEGIN IMMEDIATE` transaction. Item quantity/status and the corresponding immutable history row commit together. This serializes concurrent scans and prevents two requests from consuming the same last unit. The movement table has a unique idempotency key; reuse with the same payload returns the original result, while reuse with another payload returns `409`.
+Every movement request is handled by `StockMovementService` inside a SQLite `BEGIN IMMEDIATE` transaction. Item quantity/status and the corresponding immutable history row commit together. This serializes concurrent scans and prevents two requests from consuming the same last unit. The movement table has a unique idempotency key; reuse with the same payload returns the original result, while reuse with another payload returns `409`. For `initialize`, the stored tracking mode and the explicit confirmation are part of that payload comparison, so replaying a key with a different stock model returns `409`.
 
 `POST /api/v1/items/{id}/movements` uses whole-package counts (the package-size metadata is not a multiplier):
 
@@ -65,7 +65,7 @@ Every movement request is handled by `StockMovementService` inside a SQLite `BEG
 {"action":"initialize","quantity":6,"tracking_mode":"exact","confirm_initial_stock":true,"source":"barcode","idempotency_key":"unique-baseline"}
 ```
 
-Initialization accepts a non-negative whole count, including `0`. A confirmed zero is represented as `stock_status: "known"` and `quantity: 0`; it is distinct from an unknown `null` count. The movement ledger records a zero delta only for initialization and the matching undo. Receive and consume requests with quantity zero remain invalid.
+Initialization accepts a non-negative whole count, including `0`. Every movement quantity and resulting numeric stock is capped at `9,007,199,254,740,991` (`Number.MAX_SAFE_INTEGER`), so the value remains exact for browser clients and fits SQLite's integer storage. Values beyond this cap return `400` before a database write. A confirmed zero is represented as `stock_status: "known"` and `quantity: 0`; it is distinct from an unknown `null` count. The movement ledger records a zero delta only for initialization and the matching undo. Receive and consume requests with quantity zero remain invalid.
 
 Consumption that would take stock below zero returns `409` and does not write either the item update or a movement. Requests require a unique `idempotency_key` (1–128 characters). `source` is a short label such as `barcode` or `manual`; optional `note` is limited to 500 characters.
 

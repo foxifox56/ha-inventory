@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import math
 from datetime import datetime, timezone
 from typing import Any
 
@@ -14,6 +15,9 @@ class StockMovementService:
     """Change a persisted item's stock only with an audited movement."""
 
     ACTIONS = {"receive", "consume", "initialize"}
+    # Keep counts exact in SQLite and JavaScript clients. This is lower than
+    # SQLite's signed 64-bit integer limit and avoids JS number rounding.
+    MAX_SAFE_QUANTITY = (1 << 53) - 1
 
     def __init__(self, database: Database):
         self.database = database
@@ -24,15 +28,35 @@ class StockMovementService:
 
     @staticmethod
     def _positive_integer(value: Any) -> int:
-        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-            raise InventoryError("Die Buchungsmenge muss eine ganze Zahl größer 0 sein.", field="quantity")
+        if (isinstance(value, bool) or not isinstance(value, int) or value <= 0
+                or value > StockMovementService.MAX_SAFE_QUANTITY):
+            raise InventoryError(
+                "Die Buchungsmenge muss eine ganze Zahl zwischen 1 und 9.007.199.254.740.991 sein.",
+                field="quantity",
+            )
         return value
 
     @staticmethod
     def _initial_quantity(value: Any) -> int:
-        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-            raise InventoryError("Der Startbestand muss eine ganze Zahl ab 0 sein.", field="quantity")
+        if (isinstance(value, bool) or not isinstance(value, int) or value < 0
+                or value > StockMovementService.MAX_SAFE_QUANTITY):
+            raise InventoryError(
+                "Der Startbestand muss eine ganze Zahl zwischen 0 und 9.007.199.254.740.991 sein.",
+                field="quantity",
+            )
         return value
+
+    @staticmethod
+    def _validate_resulting_quantity(value: Any) -> None:
+        """Reject a resulting count before binding it to SQLite."""
+        valid = isinstance(value, int) and not isinstance(value, bool)
+        if isinstance(value, float):
+            valid = math.isfinite(value)
+        if not valid or value > StockMovementService.MAX_SAFE_QUANTITY:
+            raise InventoryError(
+                "Der resultierende Bestand überschreitet den unterstützten Höchstwert.",
+                field="quantity",
+            )
 
     @staticmethod
     def _key(payload: dict[str, Any]) -> str:
@@ -66,12 +90,17 @@ class StockMovementService:
     def _same_request(
         existing: dict[str, Any], *, item_id: int, action: str, quantity: int,
         source: str, note: str, undo_of: int | None = None,
+        tracking_mode: str | None = None, confirm_initial_stock: Any = None,
     ) -> bool:
         return (
             existing["item_id"] == item_id and existing["action"] == action
             and abs(existing["delta_quantity"]) == quantity
             and existing["source"] == source and existing["note"] == note
             and existing["undo_of_movement_id"] == undo_of
+            and (action != "initialize" or (
+                tracking_mode == existing["tracking_mode_after"]
+                and confirm_initial_stock is True
+            ))
         )
 
     def book(self, item_id: int, payload: dict[str, Any]) -> dict[str, Any]:
@@ -101,7 +130,9 @@ class StockMovementService:
             replay = self._existing_key(connection, key)
             if replay:
                 if not self._same_request(replay, item_id=item_id, action=action,
-                                          quantity=quantity, source=source, note=note):
+                                          quantity=quantity, source=source, note=note,
+                                          tracking_mode=payload.get("tracking_mode"),
+                                          confirm_initial_stock=payload.get("confirm_initial_stock")):
                     raise InventoryError("Der Idempotenzschlüssel wurde bereits für eine andere Buchung verwendet.", status_code=409)
                 connection.commit()
                 replay["replayed"] = True
@@ -132,6 +163,9 @@ class StockMovementService:
                 after_quantity = before["quantity"] + delta
                 if after_quantity < 0:
                     raise InventoryError("Die Buchung würde den Lagerbestand unter 0 senken.", status_code=409)
+            self._validate_resulting_quantity(after_quantity)
+            if abs(delta) > self.MAX_SAFE_QUANTITY:
+                raise InventoryError("Die Buchungsmenge überschreitet den unterstützten Höchstwert.", field="quantity")
 
             connection.execute(
                 "UPDATE inventory_items SET tracking_mode = ?, stock_status = ?, quantity = ?, updated_at = ? WHERE id = ?",
@@ -222,8 +256,11 @@ class StockMovementService:
                 after_quantity = item["quantity"] + delta
                 if after_quantity < 0:
                     raise InventoryError("Rückgängig würde den Bestand unter 0 senken. Hebe zuerst spätere Verbrauchsbuchungen auf.", status_code=409)
+                self._validate_resulting_quantity(after_quantity)
                 after_mode = item["tracking_mode"]
                 after_status = "known"
+            if abs(delta) > self.MAX_SAFE_QUANTITY:
+                raise InventoryError("Die Buchungsmenge überschreitet den unterstützten Höchstwert.", field="quantity")
 
             now = self._timestamp()
             connection.execute(

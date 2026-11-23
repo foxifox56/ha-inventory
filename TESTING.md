@@ -6,8 +6,8 @@ Stand: 23.11.2026 · Branch `development/v0.3`. Automatisierte Tests verwenden t
 
 | Prüfung | Umfang und Ergebnis |
 | --- | --- |
-| Backendtests | 59 Tests bestanden: v1-API, Ingress und Schreibsitzung, Produkt-Lookup, Bewegungsservice, Idempotenz, parallele Scans, negativer Bestand, bestätigter Nullbestand, Undo-Regeln und Fehlerbehandlung |
-| Frontendtests | 36 Tests bestanden: Produkt-Lookup, Bestandsschutz, Scan-Modi, Abbruch veralteter Lookups, Prüfung des bestätigten Modus direkt vor der Mutation (auch nach Schreibsitzungs-Refresh), Mengenvalidierung ohne Rundung, persistente Idempotenzschlüssel für Buchung/Undo und Kameraadapter |
+| Backendtests | 62 Tests bestanden: v1-API, Ingress und Schreibsitzung, Produkt-Lookup, Bewegungsservice, Idempotenz einschließlich Bestandsmodell bei Startbestands-Replays, parallele Scans, negative Bestände und Überläufe, bestätigter Nullbestand, Undo-Regeln und Fehlerbehandlung |
+| Frontendtests | 37 Tests bestanden: Produkt-Lookup, Bestandsschutz, Scan-Modi samt sichtbaren Sicherheitshinweisen, Abbruch veralteter Lookups, Prüfung des bestätigten Modus direkt vor der Mutation (auch nach Schreibsitzungs-Refresh), Mengenvalidierung ohne Rundung, persistente Idempotenzschlüssel für Buchung/Undo und Kameraadapter |
 | Rückwärtskompatibilität | v1-/v3-Altstände, v4→v5→v6 und v5→v6; Artikelwerte sowie vorhandene Bewegungs-IDs, Idempotenzschlüssel und Undo-Referenzen bleiben erhalten |
 | Syntax | `compileall` und `node --check` für App, API-Client, Produkt-Lookup, Scanner, Navigations- und Buchungsmodule bestanden |
 | Home-Assistant-App-Konfiguration | YAML erfolgreich gelesen; Version `0.3.0`, Architekturen `aarch64`/`amd64`, `backup: cold` |
@@ -25,7 +25,7 @@ python3 -m compileall -q backend
 for file in frontend/*.js frontend/*.mjs frontend/vendor/*.mjs; do node --check "$file" || exit 1; done
 ```
 
-Die lokalen Tests und die GitHub-Actions-Runs #33 und #34 wurden nach den Review-Korrekturen einschließlich Mutation-Preflight ausgeführt. Beide Workflows prüften Commit `7e46824`; die Container-Smokes deckten `linux/amd64` und `linux/arm64` ab. Ein ARM64-Container-Test ist kein Supervisor- oder Raspberry-Pi-Hardwaretest; er belegt keinen echten Pi-/Supervisor-Test.
+Die aktuellen lokalen Testläufe umfassen 62 Backend- und 37 Frontendtests. GitHub-Actions-Runs #35 und #36 prüfen den vorherigen Stand `b59122f`; beide Workflows waren erfolgreich und deckten Container-Smokes auf `linux/amd64` sowie `linux/arm64` ab. Die CI-Prüfung für die aktuellen Änderungen wird nach dem Push ergänzt. Ein ARM64-Container-Test ist kein Supervisor- oder Raspberry-Pi-Hardwaretest; er belegt keinen echten Pi-/Supervisor-Test.
 
 ## Manuelle Testanleitung: iPhone über Ingress und Nabu Casa
 
@@ -44,6 +44,8 @@ Der echte iPhone-Kameratest wurde in dieser Entwicklungsrunde **nicht durchgefü
 11. Im Verbrauchsmodus eine Suche starten und vor der Serverantwort zu **Ansehen** wechseln. Die Suche muss abbrechen; die verspätete Antwort darf nicht buchen.
 12. Nach Möglichkeit die Netzwerkverbindung unmittelbar nach einer bestätigten Buchung unterbrechen. Die App muss dieselbe Absicht mit demselben Schlüssel abgleichen können; Bestand und Verlauf dürfen nur eine Bewegung enthalten. Dies auch für Undo prüfen.
 13. Mengen wie `2.8`, `-1`, `0` beim Einlagern/Verbrauchen und leere Eingaben testen. Ungültige Eingaben werden abgelehnt und nicht gerundet oder zu `1` verändert; nur die Startbestandsinitialisierung akzeptiert ausdrücklich `0`.
+14. Mengen oberhalb von `9.007.199.254.740.991` sowie eine Einlagerung, deren resultierender Bestand diese Grenze überschreiten würde, müssen mit einer verständlichen Validierungsmeldung abgelehnt werden; Bestand und Verlauf bleiben unverändert.
+15. Eine Startbestandsinitialisierung mit demselben Idempotenzschlüssel und unverändertem Bestandsmodell muss das Ergebnis wiedergeben. Ein anderer Bestandsmodus oder fehlende Bestätigung mit demselben Schlüssel muss `409` liefern und darf den Bestand nicht ändern.
 
 ## Grenzen und nicht durchgeführte Prüfungen
 

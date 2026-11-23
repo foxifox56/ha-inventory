@@ -59,6 +59,55 @@ class StockMovementTests(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 409)
         self.assertEqual(self.inventory.get(self.item["id"])["quantity"], 5)
 
+    def test_idempotent_initialization_compares_tracking_mode_and_confirmation(self) -> None:
+        unknown = self.inventory.create({"name": "Schrauben", "tracking_mode": "inventory"})
+        payload = {
+            "action": "initialize", "quantity": 3, "tracking_mode": "exact",
+            "confirm_initial_stock": True, "idempotency_key": "initial-mode-key",
+        }
+        first = self.movements.book(unknown["id"], payload)
+        matching_replay = self.movements.book(unknown["id"], payload)
+        self.assertTrue(matching_replay["replayed"])
+        self.assertEqual(matching_replay["id"], first["id"])
+
+        with self.assertRaises(InventoryError) as wrong_mode:
+            self.movements.book(unknown["id"], dict(payload, tracking_mode="inventory"))
+        self.assertEqual(wrong_mode.exception.status_code, 409)
+        with self.assertRaises(InventoryError) as missing_confirmation:
+            self.movements.book(unknown["id"], dict(payload, confirm_initial_stock=False))
+        self.assertEqual(missing_confirmation.exception.status_code, 409)
+        self.assertEqual(self.inventory.get(unknown["id"])["tracking_mode"], "exact")
+        self.assertEqual(self.inventory.get(unknown["id"])["quantity"], 3)
+        self.assertEqual(len(self.movements.list_for_item(unknown["id"])), 1)
+
+    def test_movement_quantities_and_resulting_stock_are_capped_at_safe_integer(self) -> None:
+        maximum = self.movements.MAX_SAFE_QUANTITY
+        for action, quantity, key in (
+            ("receive", maximum + 1, "too-large-receive"),
+            ("consume", 1 << 100, "enormous-consume"),
+        ):
+            with self.subTest(action=action), self.assertRaises(InventoryError) as raised:
+                self.book(action, quantity, key)
+            self.assertEqual(raised.exception.status_code, 400)
+
+        unknown = self.inventory.create({"name": "Großbestand", "tracking_mode": "inventory"})
+        with self.assertRaises(InventoryError) as initial_too_large:
+            self.movements.book(unknown["id"], {
+                "action": "initialize", "quantity": maximum + 1, "tracking_mode": "exact",
+                "confirm_initial_stock": True, "idempotency_key": "too-large-initial",
+            })
+        self.assertEqual(initial_too_large.exception.status_code, 400)
+        self.assertIsNone(self.inventory.get(unknown["id"])["quantity"])
+
+        maximum_item = self.inventory.create({"name": "Maximalbestand", "tracking_mode": "exact", "quantity": maximum})
+        with self.assertRaises(InventoryError) as overflow:
+            self.movements.book(maximum_item["id"], {
+                "action": "receive", "quantity": 1, "idempotency_key": "result-too-large",
+            })
+        self.assertEqual(overflow.exception.status_code, 400)
+        self.assertEqual(self.inventory.get(maximum_item["id"])["quantity"], maximum)
+        self.assertEqual(self.movements.list_for_item(maximum_item["id"]), [])
+
     def test_concurrent_scans_cannot_overdraw_the_same_last_unit(self) -> None:
         item = self.inventory.create({"name": "Einzeldose", "tracking_mode": "exact", "quantity": 1})
 
