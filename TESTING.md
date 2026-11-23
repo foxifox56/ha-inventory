@@ -15,7 +15,8 @@ Die folgenden Prüfungen liefen in der Entwicklungsumgebung auf temporären SQLi
 | Konfiguration | `ha_inventory/config.yaml` und `.github/workflows/ci.yml` erfolgreich mit PyYAML geladen. Add-on-Metadaten deklarieren `aarch64` und `amd64`, Version `0.4.0` und `backup: cold`. |
 | Lokale OCR-Funktionsprobe | Synthetischer REWE-Bon wurde mit dem lokal installierten Tesseract tatsächlich erkannt; Multiplikator `2 X MILCH` ergab Menge 2. Lokal ist nur `eng` installiert. Dies ist kein Docker-, `deu`- oder Hardwaretest. |
 | Lokaler Docker-Smoke-Test | **Nicht durchgeführt**: Die Entwicklungsumgebung stellt keine Docker-CLI bereit. |
-| GitHub Actions Push-/PR-Workflows für diese Review-Korrekturen | **Nach dem Commit ausstehend.** Der Workflow baut AMD64 und ARM64 und prüft in beiden Containern Tesseract `deu+eng` mit echter OCR eines synthetischen REWE-Belegs. Die finalen Run-Links und geprüften Commit-SHAs werden nach CI-Abschluss eingetragen. |
+| GitHub Actions Push-Workflow | **Erfolgreich**, [Run #47](https://github.com/foxifox56/ha-inventory/actions/runs/45266735458), geprüfter Commit [`f1778228bf8d709dc88be04b9987e23a735d7b4a`](https://github.com/foxifox56/ha-inventory/commit/f1778228bf8d709dc88be04b9987e23a735d7b4a). Backend-/Frontendtests sowie AMD64- und ARM64-Container-Smokes bestanden. |
+| GitHub Actions PR-Workflow | **Erfolgreich**, [Run #48](https://github.com/foxifox56/ha-inventory/actions/runs/45266750923), derselbe geprüfte Commit. Backend-/Frontendtests sowie AMD64- und ARM64-Container-Smokes bestanden. |
 
 Befehle aus `ha_inventory/`:
 
@@ -42,7 +43,7 @@ Der CI-Workflow baut und startet das Home Assistant-App-Image getrennt für `lin
 - Dass die reine Erkennung weder Artikel noch Bestand anlegt.
 - Buchung, idempotentes Replay, Undo, Bewegungsverlauf und Persistenz nach Container-Neustart.
 
-Diese Prüfungen belegen die Container-Laufzeit unter den beiden Zielarchitekturen; sie sind keine Raspberry-Pi-, HAOS-Supervisor- oder iPhone-Kameratests. Die vorherigen v0.4-Läufe #41–#44 prüften den vorherigen Stand. Für diese Review-Korrekturen werden neue Push- und PR-Läufe abgewartet und anschließend mit Commit-SHA dokumentiert. Container-Smokes verwenden reproduzierbare synthetische Belege, keine echten persönlichen Bons.
+Diese Prüfungen belegen die Container-Laufzeit unter den beiden Zielarchitekturen; sie sind keine Raspberry-Pi-, HAOS-Supervisor- oder iPhone-Kameratests. Push-Run #47 und PR-Run #48 prüften beide den Codecommit `f1778228bf8d709dc88be04b9987e23a735d7b4a`. Container-Smokes verwenden reproduzierbare synthetische Belege, keine echten persönlichen Bons.
 
 ## Manuelle iPhone-Prüfung über Home Assistant Ingress / Nabu Casa
 
@@ -63,8 +64,8 @@ Echter iPhone-, Safari-, Home-Assistant-Ingress- und Nabu-Casa-Test: **nicht dur
 
 - Echter iPhone-Kamera-/Safari-/HA-Ingress-/Nabu-Casa-Test: **nicht durchgeführt**.
 - Echter Raspberry-Pi-4-, HAOS-64-bit- und Supervisor-Installations-/Backup-Test: **nicht durchgeführt**. Es wurde nichts auf einem produktiven System installiert oder geändert.
-- Lokaler Docker-Smoke-Test: **nicht durchgeführt**, weil Docker nicht verfügbar ist. Die CI für diese Review-Korrekturen steht noch aus.
-- Lokale OCR-Probe verwendete nur Englisch (`eng`); `deu` + `eng` war auf dem vorherigen v0.4-Stand durch GitHub-Actions-Containerläufe verifiziert. Die Prüfung für die neuen Korrekturen steht noch aus.
+- Lokaler Docker-Smoke-Test: **nicht durchgeführt**, weil Docker nicht verfügbar ist. AMD64- und ARM64-Container-Smokes liefen erfolgreich in den GitHub-Actions #47 und #48.
+- Lokale OCR-Probe verwendete nur Englisch (`eng`); `deu` + `eng` wurden in den tatsächlichen AMD64- und ARM64-Containern der GitHub-Actions #47 und #48 geprüft.
 - Live-OCR mit echten, persönlichen REWE-/Kaufland-Belegen: **nicht durchgeführt**. CI verwendet synthetische Belege; Bonlayouts und Druckqualität variieren.
 - HEIC-Konvertierung hängt vom iOS-Browser ab. Wenn das Foto nicht dekodiert werden kann, muss der Nutzer ein kompatibles Bild wählen oder erneut aufnehmen.
 - OCR, Händlererkennung und schwache Beleg-Fingerprints sind fehlertolerante Vorschläge. Jede Zeile, Menge und Zuordnung muss geprüft werden. Ein Fingerprint kann ähnliche Einkäufe als möglichen Duplikatfall markieren; die UI verlangt dann eine ausdrückliche Entscheidung.
