@@ -244,6 +244,9 @@ class ReceiptServiceTests(unittest.TestCase):
         payload["rows"][0]["quantity"] = 1 << 100
         with self.assertRaises(InventoryError):
             self.receipts.import_receipt(recognized["receipt_id"], payload)
+        payload["rows"][0]["quantity"] = None
+        with self.assertRaises(InventoryError):
+            self.receipts.import_receipt(recognized["receipt_id"], payload)
         payload["rows"][0]["quantity"] = 0
         with self.assertRaises(InventoryError):
             self.receipts.import_receipt(recognized["receipt_id"], payload)
