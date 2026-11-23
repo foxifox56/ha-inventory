@@ -1,10 +1,12 @@
 # HA Inventory – Home-Assistant-App
 
-## Installation
+## Installation auf Home Assistant OS
 
-Füge das Repository `https://github.com/foxifox56/ha-inventory#development/v0.1` in **Einstellungen → Apps → App installieren → Repositories** hinzu. Installiere danach **HA Inventory**, starte die App und öffne die Web-Oberfläche über Ingress.
+Das GitHub-Repository ist derzeit privat und kann nicht über die normale Repository-URL im App Store bezogen werden. Für einen lokalen Test nach der Überprüfung kopiere den Inhalt dieses App-Ordners in `local_apps/ha_inventory/` auf Home Assistant OS. Aktualisiere dann unter **Einstellungen → Apps → App installieren** die App-Liste, installiere **HA Inventory** aus **Local apps**, starte sie und öffne die Web-Oberfläche.
 
-Der erste Build läuft direkt auf dem Home-Assistant-Gerät. Auf einem Raspberry Pi 4 kann das einige Minuten dauern. Es werden keine Ports auf dem Heimnetz freigegeben; die Oberfläche läuft ausschließlich über den Home-Assistant-Ingress.
+Der lokale App-Ordner ist für die Entwicklung vorgesehen. Lade dazu die geprüfte Branch als ZIP herunter und kopiere den darin enthaltenen App-Ordner hierhin. Du erreichst `local_apps` zum Beispiel über eine bereits installierte Samba-Share- oder Terminal-&-SSH-App. Der Supervisor baut das Image beim Installieren direkt auf dem Home-Assistant-Gerät; auf einem Raspberry Pi 4 kann das einige Minuten dauern. Es werden keine Ports im Heimnetz freigegeben; die Oberfläche läuft ausschließlich über Home-Assistant-Ingress.
+
+Diese Schritte verändern Home Assistant. Die App wurde in der Entwicklungsrunde nicht auf einer Home-Assistant-Instanz installiert.
 
 ## Nutzung
 

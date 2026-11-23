@@ -16,18 +16,20 @@ Eine lokale, universelle Lagerverwaltung als Home-Assistant-App. Version 0.1 bie
 
 ## Installation auf Home Assistant OS
 
-Die Entwicklungsfassung wird auf dem Home Assistant OS installiert und baut ihr Image dort. Der erste Build kann auf einem Raspberry Pi einige Minuten dauern. Die Datenbank liegt dauerhaft im App-Datenverzeichnis und wird vom Home-Assistant-Backup erfasst.
+Die App-Struktur ist für Home Assistant OS auf einem Raspberry Pi 4 vorbereitet. Der Home-Assistant-Supervisor baut das Image aus der `Dockerfile` auf dem Gerät; der erste Build kann einige Minuten dauern. Die Datenbank liegt dauerhaft im App-Datenverzeichnis und wird vom Home-Assistant-Backup erfasst.
 
-1. Öffne **Einstellungen → Apps → App installieren**.
-2. Öffne oben rechts das Menü **Repositories**.
-3. Füge diese Repository-Adresse ein, einschließlich Entwicklungsbranch:
+**Wichtig:** Das GitHub-Repository ist derzeit privat. Home Assistant kann es nicht einfach über die normale Repository-URL aus dem App Store beziehen. Für einen Test nach der Überprüfung muss der App-Ordner lokal bereitgestellt werden. Ich habe die App nicht auf deinem produktiven Home Assistant installiert.
 
-   `https://github.com/foxifox56/ha-inventory#development/v0.1`
+### Lokaler Test nach der Überprüfung
 
-4. Aktualisiere die App-Liste, wähle **HA Inventory** und installiere die App.
-5. Starte sie und öffne **Web-Oberfläche öffnen**.
+1. Kopiere den Inhalt von `ha_inventory/` in den `local_apps/ha_inventory/`-Ordner von Home Assistant OS.
+2. Öffne **Einstellungen → Apps → App installieren** und aktualisiere die App-Liste.
+3. Wähle unter **Local apps** die **HA Inventory** aus und installiere sie.
+4. Starte die App und öffne die Web-Oberfläche.
 
-Home Assistant OS auf einem Raspberry Pi 4 mit 64-Bit-System (`aarch64`) wird unterstützt. `armv7` ist für 32-Bit-Installationen eingetragen, sofern das verwendete Python-Basisimage diese Architektur bereitstellt. `amd64` ist für Entwicklungs- und Testsysteme enthalten.
+Der `local_apps`-Ordner ist der Home-Assistant-Entwicklungsweg für lokal bereitgestellte Apps. Die aktuelle Branch kannst du in GitHub als ZIP herunterladen; kopiere dann nur den Inhalt des darin enthaltenen `ha_inventory/`-Ordners. Du erreichst `local_apps` beispielsweise über eine bereits installierte Samba-Share- oder Terminal-&-SSH-App. Diese Schritte verändern den Home Assistant; führe sie erst aus, wenn du die Version geprüft hast und einen Test dort möchtest.
+
+Der App-Eintrag unterstützt Home Assistant OS auf Raspberry Pi 4 (`aarch64`) sowie `armv7`- und `amd64`-Builds, sofern die jeweilige Python-Basisimage-Architektur verfügbar ist. Für automatische Updates aus dem App Store müsste später ein öffentlich erreichbares Repository oder ein anderer für den Supervisor erreichbarer Git-Endpunkt eingerichtet werden.
 
 ### Barcode-Scan mit der Handykamera
 
