@@ -50,6 +50,7 @@ proxy_request() {
 start_app >/dev/null
 proxy_request 172.30.32.2 wait
 proxy_request 172.30.32.2 frontend
+proxy_request 172.30.32.2 receipt-ocr
 proxy_request 172.30.32.2 create
 proxy_request 172.30.32.4 denied
 
@@ -58,4 +59,4 @@ start_app >/dev/null
 proxy_request 172.30.32.2 wait
 proxy_request 172.30.32.2 read
 
-echo "Container checks passed${platform:+ for $platform}: build, startup, ingress, idempotent stock booking, undo, history, and /data persistence."
+echo "Container checks passed${platform:+ for $platform}: build, startup, ingress, local Tesseract deu+eng OCR, receipt parsing, idempotent stock booking, undo, history, and /data persistence."

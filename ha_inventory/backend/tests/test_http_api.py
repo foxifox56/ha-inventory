@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import io
 import tempfile
 import threading
 import unittest
@@ -8,6 +9,15 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
+from PIL import Image
+
+from backend.receipt.ocr import OCRLine, OCRResult
+
+
+class StaticReceiptOCR:
+    def recognize(self, _image: bytes, _content_type: str) -> OCRResult:
+        lines = (OCRLine("REWE", .99), OCRLine("MILCH 1,20", .99), OCRLine("SUMME 1,20", .99))
+        return OCRResult("\n".join(line.text for line in lines), lines, ("deu", "eng"))
 
 from backend.app import create_handler
 from backend.product_lookup.provider import (
@@ -23,7 +33,8 @@ class HttpApiTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         handler = create_handler(
-            Path(self.temp_dir.name), ingress_ip_check=False, product_providers=[]
+            Path(self.temp_dir.name), ingress_ip_check=False, product_providers=[],
+            receipt_ocr=StaticReceiptOCR(),
         )
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -55,6 +66,23 @@ class HttpApiTests(unittest.TestCase):
                 return response.status, json.loads(response.read()), response.headers
         except HTTPError as error:
             return error.code, json.loads(error.read()), error.headers
+
+    def request_raw(self, path: str, body: bytes, content_type: str, headers: dict[str, str] | None = None):
+        request = Request(
+            self.base_url + path, data=body, method="POST",
+            headers={"Content-Type": content_type, **(headers or {})},
+        )
+        try:
+            with urlopen(request, timeout=3) as response:
+                return response.status, json.loads(response.read()), response.headers
+        except HTTPError as error:
+            return error.code, json.loads(error.read()), error.headers
+
+    @staticmethod
+    def png_image() -> bytes:
+        buffer = io.BytesIO()
+        Image.new("RGB", (200, 400), "white").save(buffer, format="PNG")
+        return buffer.getvalue()
 
     def test_create_list_lookup_update_and_delete(self) -> None:
         _, session, _ = self.request("/api/v1/write-session")
@@ -109,6 +137,78 @@ class HttpApiTests(unittest.TestCase):
             self.assertEqual(response.status, 200)
             self.assertIn("javascript", response.headers["Content-Type"])
             self.assertGreater(int(response.headers["Content-Length"]), 100_000)
+
+    def test_receipt_recognition_is_ingress_and_write_session_protected_and_read_only(self) -> None:
+        image = self.png_image()
+        self.assertEqual(self.request_raw("/api/v1/receipts/recognize", image, "image/png")[0], 403)
+        _, session, _ = self.request("/api/v1/write-session")
+        headers = {"X-HA-Inventory-Write-Token": session["write_token"]}
+        status, result, _ = self.request_raw("/api/v1/receipts/recognize", image, "image/png", headers)
+        self.assertEqual(status, 200)
+        self.assertEqual(result["merchant"], "rewe")
+        self.assertEqual(len(result["lines"]), 1)
+        self.assertEqual(self.request("/api/v1/items")[1]["items"], [])
+        details = self.request(f"/api/v1/receipts/{result['receipt_id']}")
+        self.assertEqual(details[0], 200)
+        self.assertEqual(details[1]["receipt"]["status"], "recognized")
+        self.assertEqual(details[1]["movements"], [])
+
+    def test_receipt_import_replay_bulk_undo_and_unknown_stock_confirmation(self) -> None:
+        _, session, _ = self.request("/api/v1/write-session")
+        headers = {"X-HA-Inventory-Write-Token": session["write_token"]}
+        image = self.png_image()
+        _, recognized, _ = self.request_raw("/api/v1/receipts/recognize", image, "image/png", headers)
+        line = recognized["lines"][0]
+        unknown = {
+            "confirmed": True, "idempotency_key": "receipt-http-import",
+            "rows": [{"line_ids": line["line_ids"], "label": line["label"],
+                      "decision": "new", "name": "Milch", "quantity": 1,
+                      "category": "Lebensmittel", "location": "Kühlschrank",
+                      "unit": "Packung", "tracking_mode": "exact"}],
+        }
+        status, not_confirmed, _ = self.request(
+            f"/api/v1/receipts/{recognized['receipt_id']}/import", "POST",
+            dict(unknown, confirmed=False), headers,
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(self.request("/api/v1/items")[1]["items"], [])
+
+        status, imported, _ = self.request(
+            f"/api/v1/receipts/{recognized['receipt_id']}/import", "POST", unknown, headers,
+        )
+        self.assertEqual(status, 201)
+        self.assertEqual(len(imported["movements"]), 1)
+        item = self.request("/api/v1/items")[1]["items"][0]
+        self.assertEqual((item["quantity"], item["tracking_mode"]), (1, "exact"))
+        status, replay, _ = self.request(
+            f"/api/v1/receipts/{recognized['receipt_id']}/import", "POST", unknown, headers,
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(replay["replayed"])
+        self.assertEqual(self.request("/api/v1/items")[1]["items"][0]["quantity"], 1)
+
+        undo_payload = {"confirmed": True, "idempotency_key": "receipt-http-undo"}
+        status, undone, _ = self.request(
+            f"/api/v1/receipts/{recognized['receipt_id']}/undo", "POST", undo_payload, headers,
+        )
+        self.assertEqual(status, 201)
+        self.assertEqual(self.request(f"/api/v1/items/{item['id']}")[1]["item"]["quantity"], None)
+        status, undo_replay, _ = self.request(
+            f"/api/v1/receipts/{recognized['receipt_id']}/undo", "POST", undo_payload, headers,
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(undo_replay["replayed"])
+
+    def test_receipt_mutation_rejects_expired_write_session(self) -> None:
+        _, session, _ = self.request("/api/v1/write-session")
+        handler = self.server.RequestHandlerClass
+        handler.write_tokens[session["write_token"]] = 0
+        status, body, _ = self.request_raw(
+            "/api/v1/receipts/recognize", self.png_image(), "image/png",
+            {"X-HA-Inventory-Write-Token": session["write_token"]},
+        )
+        self.assertEqual(status, 403)
+        self.assertEqual(body["code"], "write_session_invalid")
 
     def test_validation_error_is_json(self) -> None:
         _, session, _ = self.request("/api/v1/write-session")
@@ -186,6 +286,9 @@ class HttpApiTests(unittest.TestCase):
         finally:
             handler.require_ingress_proxy = False
         self.assertEqual(status, 403)
+        self.assertEqual(self.request_raw(
+            "/api/v1/receipts/recognize", self.png_image(), "image/png"
+        )[0], 403)
         self.assertIn("Ingress", body["error"])
 
     def test_ingress_gate_accepts_only_the_supervisor_proxy(self) -> None:

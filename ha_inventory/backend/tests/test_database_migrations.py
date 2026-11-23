@@ -64,7 +64,10 @@ class DatabaseMigrationTests(unittest.TestCase):
         })
         connection = database.connect()
         try:
+            connection.execute("PRAGMA foreign_keys = OFF")
             connection.execute("DROP TABLE stock_movements")
+            connection.execute("DROP TABLE receipt_product_aliases")
+            connection.execute("DROP TABLE receipt_imports")
             connection.execute("DELETE FROM schema_migrations WHERE version >= 5")
             connection.commit()
         finally:
@@ -90,7 +93,7 @@ class DatabaseMigrationTests(unittest.TestCase):
         finally:
             connection.close()
 
-    def test_v5_to_v6_preserves_movement_ids_and_undo_relationships(self) -> None:
+    def test_v5_upgrade_preserves_movement_ids_and_undo_relationships_through_v7(self) -> None:
         database = Database(self.data_dir)
         database.initialize()
         item = InventoryService(InventoryRepository(database)).create({
@@ -105,6 +108,8 @@ class DatabaseMigrationTests(unittest.TestCase):
         connection = database.connect()
         try:
             connection.execute("PRAGMA foreign_keys = OFF")
+            connection.execute("DROP TABLE receipt_product_aliases")
+            connection.execute("DROP TABLE receipt_imports")
             connection.execute(
                 """CREATE TABLE stock_movements_v5 (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -139,7 +144,7 @@ class DatabaseMigrationTests(unittest.TestCase):
             connection.execute(
                 "CREATE INDEX stock_movements_item_created_idx ON stock_movements(item_id, id DESC)"
             )
-            connection.execute("DELETE FROM schema_migrations WHERE version = 6")
+            connection.execute("DELETE FROM schema_migrations WHERE version >= 6")
             connection.commit()
         finally:
             connection.close()
@@ -155,12 +160,79 @@ class DatabaseMigrationTests(unittest.TestCase):
         try:
             self.assertEqual(connection.execute(
                 "SELECT MAX(version) FROM schema_migrations"
-            ).fetchone()[0], 6)
+            ).fetchone()[0], SCHEMA_VERSION)
             # The rebuilt ledger accepts a zero initialization and its inverse.
             schema = connection.execute(
                 "SELECT sql FROM sqlite_master WHERE type='table' AND name='stock_movements'"
             ).fetchone()[0]
             self.assertIn("action = 'initialize'", schema)
+        finally:
+            connection.close()
+
+    def test_v6_to_v7_is_additive_and_preserves_items_and_movement_history(self) -> None:
+        database = Database(self.data_dir)
+        database.initialize()
+        inventory = InventoryService(InventoryRepository(database))
+        item = inventory.create({"name": "Kabelbinder", "barcode": "00042", "tracking_mode": "exact", "quantity": 8})
+        movements = StockMovementService(database)
+        received = movements.book(item["id"], {"action": "receive", "quantity": 2, "idempotency_key": "v6-receive"})
+        undone = movements.undo(received["id"], {"idempotency_key": "v6-undo"})
+
+        connection = database.connect()
+        try:
+            connection.execute("PRAGMA foreign_keys = OFF")
+            connection.execute("DROP TABLE receipt_product_aliases")
+            connection.execute("DROP TABLE receipt_imports")
+            connection.execute(
+                """CREATE TABLE stock_movements_v6_fixture (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    item_id INTEGER NOT NULL REFERENCES inventory_items(id) ON DELETE RESTRICT,
+                    action TEXT NOT NULL CHECK(action IN ('receive', 'consume', 'initialize', 'undo')),
+                    source TEXT NOT NULL DEFAULT 'manual',
+                    delta_quantity INTEGER NOT NULL CHECK(delta_quantity != 0 OR action = 'initialize'
+                      OR (action = 'undo' AND undo_of_movement_id IS NOT NULL)),
+                    quantity_before REAL CHECK(quantity_before IS NULL OR quantity_before >= 0),
+                    quantity_after REAL CHECK(quantity_after IS NULL OR quantity_after >= 0),
+                    tracking_mode_before TEXT NOT NULL,
+                    tracking_mode_after TEXT NOT NULL,
+                    stock_status_before TEXT NOT NULL,
+                    stock_status_after TEXT NOT NULL,
+                    idempotency_key TEXT NOT NULL UNIQUE,
+                    undo_of_movement_id INTEGER UNIQUE REFERENCES stock_movements_v6_fixture(id),
+                    created_at TEXT NOT NULL,
+                    note TEXT NOT NULL DEFAULT ''
+                )"""
+            )
+            connection.execute(
+                """INSERT INTO stock_movements_v6_fixture (
+                    id, item_id, action, source, delta_quantity, quantity_before, quantity_after,
+                    tracking_mode_before, tracking_mode_after, stock_status_before,
+                    stock_status_after, idempotency_key, undo_of_movement_id, created_at, note
+                ) SELECT id, item_id, action, source, delta_quantity, quantity_before, quantity_after,
+                    tracking_mode_before, tracking_mode_after, stock_status_before,
+                    stock_status_after, idempotency_key, undo_of_movement_id, created_at, note
+                  FROM stock_movements"""
+            )
+            connection.execute("DROP TABLE stock_movements")
+            connection.execute("ALTER TABLE stock_movements_v6_fixture RENAME TO stock_movements")
+            connection.execute("DELETE FROM schema_migrations WHERE version = 7")
+            connection.commit()
+        finally:
+            connection.close()
+
+        database.initialize()
+        migrated = InventoryService(InventoryRepository(database)).get(item["id"])
+        rows = StockMovementService(database).list_for_item(item["id"])
+        by_id = {row["id"]: row for row in rows}
+        self.assertEqual((migrated["barcode"], migrated["quantity"], migrated["tracking_mode"]), ("00042", 8, "exact"))
+        self.assertEqual(set(by_id), {received["id"], undone["id"]})
+        self.assertEqual(by_id[received["id"]]["idempotency_key"], "v6-receive")
+        self.assertEqual(by_id[undone["id"]]["undo_of_movement_id"], received["id"])
+        self.assertIsNone(by_id[received["id"]]["receipt_import_id"])
+        connection = database.connect()
+        try:
+            self.assertEqual(connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0], 7)
+            self.assertIsNotNone(connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='receipt_imports'").fetchone())
         finally:
             connection.close()
 

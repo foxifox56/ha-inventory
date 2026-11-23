@@ -12,6 +12,7 @@ from .inventory.service import InventoryService
 from .inventory.movements import StockMovementService
 from .product_lookup import OpenFactsProvider, ProductLookupService
 from .web.handler import InventoryRequestHandler
+from .receipt.service import ReceiptService
 
 
 def create_handler(
@@ -19,6 +20,7 @@ def create_handler(
     *,
     ingress_ip_check: bool = True,
     product_providers=None,
+    receipt_ocr=None,
 ) -> Type[InventoryRequestHandler]:
     database = Database(Path(data_dir))
     database.initialize()
@@ -26,6 +28,7 @@ def create_handler(
     movement_service = StockMovementService(database)
     providers = [OpenFactsProvider()] if product_providers is None else product_providers
     product_lookup = ProductLookupService(service, providers)
+    receipt_service = ReceiptService(database, service, movement_service, receipt_ocr)
 
     class ConfiguredInventoryHandler(InventoryRequestHandler):
         inventory = service
@@ -35,4 +38,5 @@ def create_handler(
 
     ConfiguredInventoryHandler.product_lookup = product_lookup
     ConfiguredInventoryHandler.stock_movements = movement_service
+    ConfiguredInventoryHandler.receipt_service = receipt_service
     return ConfiguredInventoryHandler

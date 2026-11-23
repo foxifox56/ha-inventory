@@ -201,6 +201,13 @@ class InventoryService:
         return item
 
     def create(self, payload: dict[str, Any]) -> dict[str, Any]:
+        values = self._create_values(payload)
+        try:
+            return self.repository.create(values)
+        except sqlite3.IntegrityError as error:
+            self._raise_create_integrity_error(error)
+
+    def _create_values(self, payload: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(payload, dict):
             raise InventoryError("Die Anfrage muss ein JSON-Objekt enthalten.")
         unknown = set(payload) - self.UPDATE_FIELDS
@@ -231,16 +238,36 @@ class InventoryService:
             "created_at": now,
             "updated_at": now,
         }
+        return values
+
+    def create_in_transaction(
+        self, connection: sqlite3.Connection, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Create an item on the caller's transaction for atomic bulk imports."""
+        values = self._create_values(payload)
+        columns = list(values)
         try:
-            return self.repository.create(values)
+            cursor = connection.execute(
+                f"INSERT INTO inventory_items ({', '.join(columns)}) "
+                f"VALUES ({', '.join('?' for _ in columns)})",
+                [values[column] for column in columns],
+            )
+            row = connection.execute(
+                "SELECT * FROM inventory_items WHERE id = ?", (cursor.lastrowid,)
+            ).fetchone()
+            return dict(row)
         except sqlite3.IntegrityError as error:
-            if "barcode" in str(error).lower():
-                raise InventoryError(
-                    "Dieser Barcode ist bereits einem Artikel zugeordnet.",
-                    status_code=409,
-                    field="barcode",
-                ) from error
-            raise
+            self._raise_create_integrity_error(error)
+
+    @staticmethod
+    def _raise_create_integrity_error(error: sqlite3.IntegrityError) -> None:
+        if "barcode" in str(error).lower():
+            raise InventoryError(
+                "Dieser Barcode ist bereits einem Artikel zugeordnet.",
+                status_code=409,
+                field="barcode",
+            ) from error
+        raise error
 
     def update(self, item_id: int, payload: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(payload, dict):

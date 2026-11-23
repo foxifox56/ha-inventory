@@ -6,7 +6,7 @@ import sqlite3
 from pathlib import Path
 
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 
 class Database:
@@ -260,6 +260,64 @@ class Database:
                 if violations:
                     raise RuntimeError("Foreign-key violations found during schema migration 6.")
                 current = 6
+
+            if current < 7:
+                # Receipt imports keep only privacy-preserving fingerprints,
+                # merchant/status metadata and learned user-confirmed aliases.
+                # OCR images and complete OCR text are never persisted.
+                with connection:
+                    connection.execute(
+                        """CREATE TABLE receipt_imports (
+                            id TEXT PRIMARY KEY,
+                            merchant TEXT NOT NULL CHECK(merchant IN ('rewe', 'kaufland', 'other')),
+                            image_sha256 TEXT NOT NULL,
+                            receipt_fingerprint TEXT NOT NULL,
+                            fingerprint_strength TEXT NOT NULL CHECK(fingerprint_strength IN ('strong', 'weak')),
+                            line_count INTEGER NOT NULL CHECK(line_count >= 0),
+                            status TEXT NOT NULL CHECK(status IN ('recognized', 'imported', 'undone')),
+                            idempotency_key TEXT UNIQUE,
+                            request_hash TEXT,
+                            undo_idempotency_key TEXT UNIQUE,
+                            undo_request_hash TEXT,
+                            duplicate_override INTEGER NOT NULL DEFAULT 0 CHECK(duplicate_override IN (0, 1)),
+                            created_at TEXT NOT NULL,
+                            imported_at TEXT,
+                            undone_at TEXT
+                        )"""
+                    )
+                    connection.execute(
+                        """CREATE INDEX receipt_imports_fingerprint_idx
+                           ON receipt_imports(merchant, receipt_fingerprint, status)"""
+                    )
+                    connection.execute(
+                        """CREATE TABLE receipt_product_aliases (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            merchant TEXT NOT NULL CHECK(merchant IN ('rewe', 'kaufland', 'other')),
+                            normalized_alias TEXT NOT NULL,
+                            alias_text TEXT NOT NULL,
+                            item_id INTEGER NOT NULL REFERENCES inventory_items(id) ON DELETE RESTRICT,
+                            created_at TEXT NOT NULL,
+                            updated_at TEXT NOT NULL,
+                            UNIQUE(merchant, normalized_alias)
+                        )"""
+                    )
+                    connection.execute(
+                        """ALTER TABLE stock_movements ADD COLUMN receipt_import_id TEXT
+                           REFERENCES receipt_imports(id) ON DELETE RESTRICT"""
+                    )
+                    connection.execute(
+                        """ALTER TABLE stock_movements ADD COLUMN receipt_line_ids TEXT
+                           NOT NULL DEFAULT '[]'"""
+                    )
+                    connection.execute(
+                        """CREATE INDEX stock_movements_receipt_idx
+                           ON stock_movements(receipt_import_id, id)"""
+                    )
+                    connection.execute(
+                        "INSERT INTO schema_migrations(version, applied_at) "
+                        "VALUES (7, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))"
+                    )
+                current = 7
 
             if current != SCHEMA_VERSION:
                 raise RuntimeError(

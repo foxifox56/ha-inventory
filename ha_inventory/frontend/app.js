@@ -4,6 +4,11 @@ import { groupByLocation, filterItems, MOBILE_VIEWS } from './mobile-navigation.
 import { startZXingScanner } from './zxing-scanner.mjs';
 import { BrowserMultiFormatReader } from './vendor/zxing-browser.mjs';
 import { createApiClient } from './api-client.mjs';
+import {
+  buildReceiptImportPayload, compressReceiptImage, createReceiptIdempotencyKey,
+  createReceiptRecognitionGuard, isReceiptQuantityValid, parseReceiptQuantity,
+  prepareAndRecognizeReceipt, receiptQuantityFieldValue, RECEIPT_UNDO_CONFIRM_MESSAGE,
+} from './receipt-flow.mjs';
 import { productPrefillValues } from './product-prefill.mjs';
 import {
   bookingForScan, buildMovementPayload, createMovementIntentStore, createScanDeduplicator,
@@ -41,6 +46,16 @@ let activeBookingSource = 'manual';
 let activeBookingIntent;
 let pendingCreateBooking = false;
 let pendingScanBooking;
+let receiptFile;
+let receiptObjectUrl;
+let receiptRotation = 0;
+let receiptDraft;
+let receiptImportIntent;
+let receiptUndoIntentKey;
+let receiptRecognizing = false;
+let receiptImporting = false;
+let receiptUndoing = false;
+const receiptRecognitionGuard = createReceiptRecognitionGuard();
 const duplicateScan = createScanDeduplicator(1200);
 const movementIntents = createMovementIntentStore();
 const scanRequestGuard = createScanRequestGuard();
@@ -159,6 +174,7 @@ async function loadItems() {
       if (detailDialog.open) refreshDetailItem();
     }
     render();
+    await restoreReceiptUndo();
   } catch (error) {
     showToast(`Verbindung fehlgeschlagen: ${error.message}`);
   }
@@ -726,6 +742,275 @@ function stopCamera() {
   $('#camera-wrap').hidden = true;
 }
 
+function receiptStatus(message, isError = false) {
+  const status = $('#receipt-status');
+  status.textContent = message;
+  status.hidden = !message;
+  status.classList.toggle('receipt-status-error', isError);
+}
+
+function chooseReceiptPhoto(file) {
+  if (!file) return;
+  if (receiptImporting || receiptUndoing) {
+    receiptStatus('Der Import oder das Rückgängigmachen läuft. Bitte warte, bis der Vorgang abgeschlossen ist, bevor du das Foto wechselst.', true);
+    return;
+  }
+  receiptRecognitionGuard.cancel();
+  receiptRecognizing = false;
+  $('#receipt-recognize').disabled = false;
+  if (receiptObjectUrl) URL.revokeObjectURL(receiptObjectUrl);
+  receiptFile = file;
+  receiptDraft = undefined;
+  receiptImportIntent = undefined;
+  receiptUndoIntentKey = undefined;
+  receiptRotation = 0;
+  receiptObjectUrl = URL.createObjectURL(file);
+  $('#receipt-photo-preview').src = receiptObjectUrl;
+  $('#receipt-photo-preview').style.transform = 'rotate(0deg)';
+  $('#receipt-editor').hidden = false;
+  $('#receipt-results').hidden = true;
+  $('#receipt-import-result').hidden = true;
+  $('#receipt-status').hidden = true;
+  $('#receipt-import-button').disabled = true;
+  $('#receipt-confirm').checked = false;
+  $('#receipt-allow-duplicate').checked = false;
+  document.querySelectorAll('[data-crop]').forEach((input) => { input.value = '0'; });
+  sessionStorage.removeItem('haInventory:lastReceiptId');
+}
+
+function renderReceiptLines(receipt) {
+  const lines = receipt.lines || [];
+  $('#receipt-line-count').textContent = `${lines.length} erkannt · ${receipt.ignored_line_count || 0} ignoriert`;
+  $('#receipt-lines').innerHTML = lines.map((line, index) => {
+    const candidate = line.item_id ? items.find((item) => item.id === line.item_id) : null;
+    const choice = candidate ? `existing:${candidate.id}` : 'new';
+    const alternatives = items.map((item) => `<option value="existing:${item.id}" ${candidate?.id === item.id ? 'selected' : ''}>${escapeHtml(item.name)} · ${escapeHtml(stockLabel(item))}</option>`).join('');
+    const needsMode = candidate && (candidate.quantity === null || candidate.stock_status !== 'known' || candidate.tracking_mode === 'simple');
+    const knownLine = candidate && !needsMode;
+    return `<article class="receipt-line" data-receipt-line="${index}">
+      <div class="receipt-line-header"><strong>Position ${index + 1}</strong><span class="receipt-confidence">${Math.round((line.confidence || 0) * 100)} % OCR</span></div>
+      <label class="field">Erkannter Artikelname
+        <input class="receipt-label" value="${escapeHtml(line.label)}" maxlength="160" />
+      </label>
+      <div class="receipt-line-header"><span class="receipt-line-review">${line.requires_review ? 'Bitte Erkennung und Menge besonders genau prüfen.' : 'Erkennung bitte vor dem Import prüfen.'}</span></div>
+      <div class="receipt-line-new-fields" ${choice !== 'new' ? 'hidden' : ''}>
+        <label class="field">Artikelname <input class="receipt-new-name" value="${escapeHtml(line.label)}" maxlength="160" /></label>
+        <label class="field">Kategorie <input class="receipt-category" value="Lebensmittel" maxlength="80" /></label>
+        <label class="field">Lagerort <input class="receipt-location" placeholder="Optional" maxlength="160" /></label>
+        <label class="field">Einheit <input class="receipt-unit" value="Stück" maxlength="40" /></label>
+        <label class="field">Barcode <input class="receipt-barcode" placeholder="Optional" maxlength="64" /></label>
+      </div>
+      <label class="field">Zuordnung
+        <select class="receipt-choice">
+          ${candidate ? `<option value="existing:${candidate.id}" selected>${escapeHtml(candidate.name)} · ${escapeHtml(stockLabel(candidate))}</option>` : '<option value="new" selected>Neuen Artikel anlegen</option>'}
+          ${alternatives}
+          <option value="new" ${candidate ? '' : ''}>Neuen Artikel anlegen</option>
+          <option value="skip">Überspringen</option>
+        </select>
+      </label>
+      <div class="receipt-line-mode" ${knownLine ? 'hidden' : ''}>
+        <label class="field">Bestandsmodell bei unbekanntem Bestand
+          <select class="receipt-tracking-mode"><option value="" selected disabled>Bitte ausdrücklich auswählen</option><option value="inventory">Geschätzter Bestand</option><option value="exact">Exakter Bestand</option></select>
+        </label>
+      </div>
+      <label class="field">Menge <input class="receipt-quantity" type="number" min="1" max="999" step="1" inputmode="numeric" required value="${receiptQuantityFieldValue(line.quantity)}" ${line.quantity == null ? 'placeholder="Menge bitte prüfen und eingeben"' : ''} /></label>
+      <label class="confirm-stock"><input class="receipt-learn-alias" type="checkbox" /> Diese Bonbezeichnung künftig automatisch zuordnen</label>
+    </article>`;
+  }).join('');
+}
+
+function receiptChoicesFromForm() {
+  return [...$('#receipt-lines').querySelectorAll('.receipt-line')].map((card) => {
+    const line = receiptDraft.lines[Number(card.dataset.receiptLine)];
+    const choice = card.querySelector('.receipt-choice').value;
+    const decision = choice === 'skip' ? 'skip' : (choice === 'new' ? 'new' : 'existing');
+    const row = {
+      line_ids: line.line_ids || [line.line_id],
+      label: card.querySelector('.receipt-label').value.trim(),
+      decision,
+      quantity: decision === 'skip' ? null : parseReceiptQuantity(card.querySelector('.receipt-quantity').value),
+      learn_alias: card.querySelector('.receipt-learn-alias').checked,
+      tracking_mode: card.querySelector('.receipt-tracking-mode').value,
+    };
+    if (decision === 'existing') {
+      row.item_id = Number(choice.slice('existing:'.length));
+      const selected = items.find((item) => item.id === row.item_id);
+      const needsInitial = selected && (selected.quantity === null || selected.stock_status !== 'known' || selected.tracking_mode === 'simple');
+      if (needsInitial && !row.tracking_mode) {
+        throw new Error(`Wähle ausdrücklich ein Bestandsmodell für „${selected.name}“.`);
+      }
+    }
+    if (decision === 'new') Object.assign(row, {
+      name: card.querySelector('.receipt-new-name').value,
+      barcode: card.querySelector('.receipt-barcode').value,
+      category: card.querySelector('.receipt-category').value,
+      location: card.querySelector('.receipt-location').value,
+      unit: card.querySelector('.receipt-unit').value,
+    });
+    return row;
+  });
+}
+
+async function recognizeReceipt() {
+  if (!receiptFile || receiptRecognizing) return;
+  const file = receiptFile;
+  const recognitionTicket = receiptRecognitionGuard.begin();
+  const rotation = receiptRotation;
+  const crop = Object.fromEntries([...document.querySelectorAll('[data-crop]')].map((input) => [input.dataset.crop, Number(input.value) / 100]));
+  receiptRecognizing = true;
+  $('#receipt-recognize').disabled = true;
+  receiptStatus('Foto wird lokal vorbereitet und anschließend mit Tesseract auf Home Assistant gelesen …');
+  try {
+    const recognition = await prepareAndRecognizeReceipt(receiptRecognitionGuard, recognitionTicket, file, {
+      imageOptions: { rotation, crop },
+      prepare: compressReceiptImage,
+      send: (blob, signal) => api('receipts/recognize', {
+        method: 'POST', body: blob, signal, headers: { 'Content-Type': 'image/jpeg' },
+      }),
+    });
+    if (recognition.stale) return;
+    receiptDraft = recognition.result;
+    receiptImportIntent = undefined;
+    $('#receipt-meta').innerHTML = `<span>${escapeHtml(receiptDraft.merchant_label)}</span>${receiptDraft.receipt_date ? `<span>${escapeHtml(receiptDraft.receipt_date)}</span>` : ''}${receiptDraft.receipt_time ? `<span>${escapeHtml(receiptDraft.receipt_time)}</span>` : ''}${receiptDraft.total ? `<span>Summe ${escapeHtml(receiptDraft.total)} €</span>` : ''}<span>${receiptDraft.fingerprint_strength === 'strong' ? 'Dublettenprüfung: stark' : 'Dublettenprüfung: Hinweis'}</span>`;
+    $('#receipt-ocr-languages').textContent = (receiptDraft.ocr?.languages || []).join(' + ');
+    $('#receipt-duplicate-warning').hidden = !receiptDraft.duplicate_warning;
+    $('#receipt-duplicate-warning').textContent = receiptDraft.duplicate_warning
+      ? 'Ein gleicher oder sehr ähnlicher Bon wurde bereits importiert. Vor einem erneuten Import bitte Datum, Uhrzeit und Beleg prüfen.' : '';
+    $('#receipt-duplicate-confirm-wrap').hidden = !receiptDraft.duplicate_warning;
+    $('#receipt-confirm').checked = false;
+    renderReceiptLines(receiptDraft);
+    $('#receipt-results').hidden = false;
+    $('#receipt-editor').hidden = true;
+    $('#receipt-import-result').hidden = true;
+    $('#receipt-import-button').textContent = `${receiptDraft.lines.length} Positionen einlagern`;
+    $('#receipt-import-button').disabled = true;
+    sessionStorage.setItem('haInventory:lastReceiptId', receiptDraft.receipt_id);
+    receiptStatus(`${receiptDraft.lines.length} Positionen erkannt. Prüfe Zuordnung und Menge; bis zur Bestätigung wurde kein Bestand verändert.`);
+  } catch (error) {
+    if (receiptRecognitionGuard.isCurrent(recognitionTicket)) {
+      receiptStatus(`${error.message} Du kannst das Bild korrigieren oder die Artikel weiterhin manuell erfassen.`, true);
+    }
+  } finally {
+    if (receiptRecognitionGuard.isCurrent(recognitionTicket)) {
+      receiptRecognizing = false;
+      $('#receipt-recognize').disabled = false;
+    }
+  }
+}
+
+function setReceiptMutationLock(locked) {
+  [
+    '#receipt-camera-input', '#receipt-library-input', '#receipt-rotate-left',
+    '#receipt-rotate-right', '#receipt-recognize', '#receipt-clear-button',
+  ].forEach((selector) => { $(selector).disabled = locked; });
+  document.querySelectorAll('[data-crop]').forEach((input) => { input.disabled = locked; });
+  document.querySelectorAll('.receipt-file-button').forEach((label) => {
+    label.classList.toggle('is-disabled', locked);
+    label.setAttribute('aria-disabled', String(locked));
+  });
+}
+
+async function importReceipt() {
+  if (!receiptDraft || receiptImporting || !$('#receipt-confirm').checked) return;
+  receiptImporting = true;
+  setReceiptMutationLock(true);
+  $('#receipt-import-button').disabled = true;
+  $('#receipt-results').querySelectorAll('input,select').forEach((control) => { control.disabled = true; });
+  try {
+    if (!receiptImportIntent) {
+      const payload = buildReceiptImportPayload(receiptDraft, receiptChoicesFromForm(), {
+        idempotencyKey: createReceiptIdempotencyKey(),
+        confirmed: $('#receipt-confirm').checked,
+        allowDuplicate: $('#receipt-allow-duplicate').checked,
+      });
+      receiptImportIntent = { payload };
+    }
+    const result = await api(`receipts/${receiptDraft.receipt_id}/import`, {
+      method: 'POST', body: JSON.stringify(receiptImportIntent.payload),
+    });
+    $('#receipt-import-message').textContent = `${result.movements.length} Lagerbewegungen wurden gemeinsam gespeichert.`;
+    $('#receipt-import-result').hidden = false;
+    $('#receipt-undo-button').hidden = false;
+    $('#receipt-undo-note').hidden = false;
+    $('#receipt-clear-button').hidden = true;
+    receiptUndoIntentKey ||= createReceiptIdempotencyKey();
+    $('#receipt-results').querySelectorAll('input,select,button').forEach((control) => { control.disabled = true; });
+    receiptStatus('Import abgeschlossen. Die Bestandsbuchungen können gemeinsam rückgängig gemacht werden; neu angelegte Artikel und gelernte Zuordnungen bleiben bestehen.');
+    await loadItems();
+  } catch (error) {
+    if (error.code === 'receipt_duplicate') {
+      receiptDraft.duplicate_warning = true;
+      $('#receipt-duplicate-warning').hidden = false;
+      $('#receipt-duplicate-warning').textContent = `${error.message} Prüfe den Hinweis und aktiviere erst danach die ausdrückliche Ausnahme.`;
+      $('#receipt-duplicate-confirm-wrap').hidden = false;
+      receiptImportIntent = undefined;
+    } else if (!Number.isInteger(error.status) || error.status >= 500 || [408, 425, 429].includes(error.status)) {
+      receiptStatus(`Verbindung unklar: ${error.message} Es wurde nichts automatisch erneut gebucht. Drücke erneut auf Einlagern, um dieselbe Anfrage mit demselben Schlüssel sicher abzugleichen.`, true);
+    } else {
+      receiptImportIntent = undefined;
+      receiptStatus(error.message, true);
+    }
+    $('#receipt-results').querySelectorAll('input,select').forEach((control) => { control.disabled = false; });
+  } finally {
+    receiptImporting = false;
+    setReceiptMutationLock(false);
+    updateReceiptImportAvailability();
+  }
+}
+
+async function undoReceiptImport() {
+  if (!receiptDraft || receiptUndoing) return;
+  if (!window.confirm(RECEIPT_UNDO_CONFIRM_MESSAGE)) return;
+  receiptUndoing = true;
+  setReceiptMutationLock(true);
+  $('#receipt-undo-button').disabled = true;
+  receiptUndoIntentKey ||= createReceiptIdempotencyKey();
+  try {
+    const result = await api(`receipts/${receiptDraft.receipt_id}/undo`, {
+      method: 'POST', body: JSON.stringify({ confirmed: true, idempotency_key: receiptUndoIntentKey }),
+    });
+    $('#receipt-import-message').textContent = `${result.movements.length} Bonbuchungen wurden gemeinsam rückgängig gemacht.`;
+    $('#receipt-undo-button').hidden = true;
+    $('#receipt-undo-note').hidden = true;
+    $('#receipt-clear-button').hidden = false;
+    await loadItems();
+  } catch (error) {
+    receiptStatus(`Der Sammel-Undo wurde nicht teilweise ausgeführt: ${error.message}`, true);
+    $('#receipt-undo-button').disabled = false;
+  } finally {
+    receiptUndoing = false;
+    setReceiptMutationLock(false);
+  }
+}
+
+function clearReceipt() {
+  if (receiptImporting || receiptUndoing) {
+    receiptStatus('Der Import oder das Rückgängigmachen läuft. Bitte warte, bis der Vorgang abgeschlossen ist.', true);
+    return;
+  }
+  receiptRecognitionGuard.cancel();
+  receiptRecognizing = false;
+  $('#receipt-recognize').disabled = false;
+  if (receiptObjectUrl) URL.revokeObjectURL(receiptObjectUrl);
+  receiptObjectUrl = undefined;
+  receiptFile = undefined;
+  receiptDraft = undefined;
+  receiptImportIntent = undefined;
+  receiptUndoIntentKey = undefined;
+  $('#receipt-camera-input').value = '';
+  $('#receipt-library-input').value = '';
+  $('#receipt-photo-preview').removeAttribute('src');
+  $('#receipt-editor').hidden = true;
+  $('#receipt-results').hidden = true;
+  $('#receipt-import-result').hidden = true;
+  $('#receipt-undo-note').hidden = true;
+  $('#receipt-clear-button').hidden = false;
+  $('#receipt-lines').replaceChildren();
+  $('#receipt-status').hidden = true;
+  $('#receipt-confirm').checked = false;
+  sessionStorage.removeItem('haInventory:lastReceiptId');
+}
+
 function syncScanMode() {
   const mode = $('#scan-mode').value;
   const wasLookingUp = barcodeLookupInProgress;
@@ -780,9 +1065,53 @@ function setActiveTab(view) {
   });
 }
 
+function updateReceiptImportAvailability() {
+  const duplicateNotConfirmed = Boolean(receiptDraft?.duplicate_warning) && !$('#receipt-allow-duplicate').checked;
+  const alreadyCompleted = !$('#receipt-import-result').hidden;
+  const unresolvedQuantity = [...$('#receipt-lines').querySelectorAll('.receipt-line')].some((card) => (
+    card.querySelector('.receipt-choice').value !== 'skip'
+    && !isReceiptQuantityValid(card.querySelector('.receipt-quantity').value)
+  ));
+  $('#receipt-import-button').disabled = !receiptDraft || !$('#receipt-confirm').checked
+    || duplicateNotConfirmed || unresolvedQuantity || receiptImporting || alreadyCompleted;
+}
+
+let receiptRestoreAttempted = false;
+async function restoreReceiptUndo() {
+  if (receiptRestoreAttempted) return;
+  receiptRestoreAttempted = true;
+  const receiptId = sessionStorage.getItem('haInventory:lastReceiptId');
+  if (!receiptId) return;
+  try {
+    const result = await api(`receipts/${receiptId}`);
+    if (result.receipt?.status === 'imported') {
+      receiptDraft = { receipt_id: receiptId };
+      receiptUndoIntentKey = createReceiptIdempotencyKey();
+      $('#receipt-results').hidden = true;
+      $('#receipt-import-result').hidden = false;
+      $('#receipt-import-message').textContent = 'Ein Kassenbon-Import wurde gespeichert. Die geprüften OCR-Zeilen werden aus Datenschutzgründen nach dem Neuladen nicht erneut angezeigt.';
+      $('#receipt-undo-button').hidden = false;
+      $('#receipt-undo-note').hidden = false;
+      $('#receipt-clear-button').hidden = true;
+    } else if (result.receipt?.status === 'undone') {
+      $('#receipt-import-result').hidden = false;
+      $('#receipt-import-message').textContent = 'Dieser Kassenbon-Import wurde bereits rückgängig gemacht.';
+      $('#receipt-undo-button').hidden = true;
+      $('#receipt-undo-note').hidden = true;
+      $('#receipt-clear-button').hidden = false;
+    } else {
+      sessionStorage.removeItem('haInventory:lastReceiptId');
+    }
+  } catch {
+    sessionStorage.removeItem('haInventory:lastReceiptId');
+  }
+}
+
 $('#add-button').addEventListener('click', () => openNewItem());
 $('#empty-add-button').addEventListener('click', () => openNewItem());
 $('#scan-button').addEventListener('click', () => setView('scanner'));
+$('#receipt-open-button').addEventListener('click', () => setView('receipts'));
+$('#receipt-manual-item').addEventListener('click', () => openNewItem());
 document.querySelector('.mobile-nav').addEventListener('click', (event) => {
   const tab = event.target.closest('[data-view]');
   if (tab) setView(tab.dataset.view);
@@ -840,6 +1169,47 @@ $('#scan-input').addEventListener('keydown', (event) => {
   }
 });
 $('#search-input').addEventListener('input', renderFilters);
+$('#receipt-camera-input').addEventListener('change', (event) => chooseReceiptPhoto(event.target.files?.[0]));
+$('#receipt-library-input').addEventListener('change', (event) => chooseReceiptPhoto(event.target.files?.[0]));
+$('#receipt-rotate-left').addEventListener('click', () => {
+  receiptRotation = (receiptRotation + 270) % 360;
+  $('#receipt-photo-preview').style.transform = `rotate(${receiptRotation}deg)`;
+});
+$('#receipt-rotate-right').addEventListener('click', () => {
+  receiptRotation = (receiptRotation + 90) % 360;
+  $('#receipt-photo-preview').style.transform = `rotate(${receiptRotation}deg)`;
+});
+$('#receipt-recognize').addEventListener('click', () => void recognizeReceipt());
+$('#receipt-confirm').addEventListener('change', () => {
+  receiptImportIntent = undefined;
+  updateReceiptImportAvailability();
+});
+$('#receipt-allow-duplicate').addEventListener('change', () => {
+  receiptImportIntent = undefined;
+  updateReceiptImportAvailability();
+});
+$('#receipt-lines').addEventListener('input', () => {
+  receiptImportIntent = undefined;
+  updateReceiptImportAvailability();
+});
+$('#receipt-lines').addEventListener('change', (event) => {
+  const card = event.target.closest('.receipt-line');
+  if (!card) return;
+  if (event.target.matches('.receipt-choice')) {
+    const choice = event.target.value;
+    const isNew = choice === 'new';
+    card.querySelector('.receipt-line-new-fields').hidden = !isNew;
+    const selectedItem = choice.startsWith('existing:')
+      ? items.find((item) => item.id === Number(choice.slice('existing:'.length))) : null;
+    const needsMode = !selectedItem || selectedItem.quantity === null || selectedItem.stock_status !== 'known' || selectedItem.tracking_mode === 'simple';
+    card.querySelector('.receipt-line-mode').hidden = choice === 'skip' || !needsMode;
+  }
+  receiptImportIntent = undefined;
+  updateReceiptImportAvailability();
+});
+$('#receipt-import-button').addEventListener('click', () => void importReceipt());
+$('#receipt-clear-button').addEventListener('click', clearReceipt);
+$('#receipt-undo-button').addEventListener('click', () => void undoReceiptImport());
 $('#item-tracking-mode').addEventListener('change', syncTrackingFields);
 $('#close-booking-dialog').addEventListener('click', () => bookingDialog.close());
 $('#cancel-booking').addEventListener('click', () => bookingDialog.close());
