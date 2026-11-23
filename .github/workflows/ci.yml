@@ -6,12 +6,14 @@ on:
       - development/v0.2
       - development/v0.3
       - development/v0.4
+      - development/v0.4-test-app
   pull_request:
     branches:
       - main
       - development/v0.1
       - development/v0.2
       - development/v0.3
+      - development/v0.4
 
 permissions:
   contents: read
@@ -36,6 +38,10 @@ jobs:
 
       - name: Install Python dependencies
         run: python -m pip install -r ha_inventory/requirements.txt
+
+      - name: Verify separate test add-on
+        run: |
+          if [ -d ha_inventory_test ]; then python scripts/sync-test-app.py --check; fi
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -63,9 +69,19 @@ jobs:
           node --check frontend/vendor/zxing-browser.mjs
 
       - name: Build and smoke-test AMD64 container
-        run: bash scripts/container-smoke.sh
+        run: |
+          if [ -d ha_inventory_test ]; then
+            INVENTORY_SMOKE_APP_DIR=ha_inventory_test bash scripts/container-smoke.sh
+          else
+            bash scripts/container-smoke.sh
+          fi
 
       - name: Build and smoke-test Raspberry Pi 4 ARM64 container
         env:
           INVENTORY_SMOKE_PLATFORM: linux/arm64
-        run: bash scripts/container-smoke.sh
+        run: |
+          if [ -d ha_inventory_test ]; then
+            INVENTORY_SMOKE_APP_DIR=ha_inventory_test bash scripts/container-smoke.sh
+          else
+            bash scripts/container-smoke.sh
+          fi

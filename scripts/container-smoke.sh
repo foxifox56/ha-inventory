@@ -4,6 +4,12 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
+app_dir="${INVENTORY_SMOKE_APP_DIR:-ha_inventory}"
+case "$app_dir" in
+  ha_inventory|ha_inventory_test) ;;
+  *) echo "Unexpected app dir: $app_dir" >&2; exit 2 ;;
+esac
+
 image_name="ha-inventory:container-smoke"
 container_name="ha-inventory-container-smoke"
 network_name="ha-inventory-smoke"
@@ -23,9 +29,9 @@ cleanup() {
 trap cleanup EXIT
 
 if [[ -n "$platform" ]]; then
-  docker buildx build "${platform_args[@]}" --load --tag "$image_name" ha_inventory
+  docker buildx build "${platform_args[@]}" --load --tag "$image_name" "$app_dir"
 else
-  docker build --tag "$image_name" ha_inventory
+  docker build --tag "$image_name" "$app_dir"
 fi
 docker network create --driver bridge --subnet 172.30.32.0/24 "$network_name" >/dev/null
 
