@@ -1,0 +1,233 @@
+"""Validation and use cases for inventory operations."""
+
+from __future__ import annotations
+
+import math
+import sqlite3
+from datetime import datetime, timezone
+from typing import Any
+
+from ..errors import InventoryError
+from .repository import InventoryRepository
+
+
+class InventoryService:
+    TEXT_LIMITS = {
+        "name": 160,
+        "barcode": 64,
+        "category": 80,
+        "unit": 40,
+        "location": 160,
+        "notes": 1000,
+    }
+    TRACKING_MODES = {"simple", "inventory", "exact"}
+    SIMPLE_STATUSES = {"unknown", "present", "out_of_stock"}
+    UPDATE_FIELDS = set(TEXT_LIMITS) | {
+        "quantity",
+        "minimum_quantity",
+        "tracking_mode",
+        "stock_status",
+    }
+
+    def __init__(self, repository: InventoryRepository):
+        self.repository = repository
+
+    @staticmethod
+    def _timestamp() -> str:
+        return datetime.now(timezone.utc).isoformat(timespec="seconds").replace(
+            "+00:00", "Z"
+        )
+
+    def _text(
+        self,
+        payload: dict[str, Any],
+        field: str,
+        *,
+        default: str = "",
+        required: bool = False,
+    ) -> str:
+        raw = payload.get(field, default)
+        if raw is None and field == "barcode":
+            return ""
+        if not isinstance(raw, str):
+            raise InventoryError("Muss Text sein.", field=field)
+        value = raw.strip()
+        if required and not value:
+            raise InventoryError("Bitte einen Namen eingeben.", field=field)
+        if len(value) > self.TEXT_LIMITS[field]:
+            raise InventoryError(
+                f"Darf höchstens {self.TEXT_LIMITS[field]} Zeichen lang sein.",
+                field=field,
+            )
+        return value
+
+    @staticmethod
+    def _quantity(raw: Any, field: str) -> float | None:
+        if raw is None or raw == "":
+            return None
+        if isinstance(raw, bool):
+            raise InventoryError("Muss eine Zahl ab 0 sein.", field=field)
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            raise InventoryError("Muss eine Zahl ab 0 sein.", field=field) from None
+        if not math.isfinite(value) or value < 0:
+            raise InventoryError("Muss eine Zahl ab 0 sein.", field=field)
+        return value
+
+    def _tracking_mode(self, raw: Any) -> str:
+        if not isinstance(raw, str) or raw not in self.TRACKING_MODES:
+            raise InventoryError("Ungültiger Bestandsmodus.", field="tracking_mode")
+        return raw
+
+    def _stock_values(
+        self,
+        payload: dict[str, Any],
+        existing: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        current_mode = existing["tracking_mode"] if existing else "simple"
+        mode = self._tracking_mode(payload.get("tracking_mode", current_mode))
+
+        if mode == "simple":
+            raw_quantity = payload.get("quantity")
+            if raw_quantity not in (None, ""):
+                raise InventoryError(
+                    "Im Modus „Einfacher Vorrat“ wird keine Menge erfasst.",
+                    field="quantity",
+                )
+            current_status = (
+                existing["stock_status"]
+                if existing and current_mode == "simple"
+                else "unknown"
+            )
+            status = payload.get("stock_status", current_status)
+            if not isinstance(status, str) or status not in self.SIMPLE_STATUSES:
+                raise InventoryError(
+                    "Wähle unbekannt, vorhanden oder nicht vorhanden.",
+                    field="stock_status",
+                )
+            return {
+                "tracking_mode": mode,
+                "stock_status": status,
+                "quantity": None,
+            }
+
+        if "quantity" in payload:
+            quantity = self._quantity(payload["quantity"], "quantity")
+        elif existing and current_mode != "simple":
+            quantity = existing["quantity"]
+        else:
+            quantity = None
+        status = "known" if quantity is not None else "unknown"
+        supplied_status = payload.get("stock_status", status)
+        if supplied_status != status:
+            raise InventoryError(
+                "Der Bestandsstatus ergibt sich aus der eingetragenen Menge.",
+                field="stock_status",
+            )
+        return {
+            "tracking_mode": mode,
+            "stock_status": status,
+            "quantity": quantity,
+        }
+
+    def list_items(self, search: str = "", category: str = "") -> list[dict[str, Any]]:
+        return self.repository.list_items(search=search.strip(), category=category.strip())
+
+    def get(self, item_id: int) -> dict[str, Any]:
+        item = self.repository.get(item_id)
+        if item is None:
+            raise InventoryError("Artikel nicht gefunden.", status_code=404)
+        return item
+
+    def get_by_barcode(self, barcode: str) -> dict[str, Any]:
+        clean_barcode = barcode.strip()
+        if not clean_barcode:
+            raise InventoryError("Barcode darf nicht leer sein.", field="barcode")
+        item = self.repository.get_by_barcode(clean_barcode)
+        if item is None:
+            raise InventoryError("Kein Artikel mit diesem Barcode gefunden.", status_code=404)
+        return item
+
+    def create(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise InventoryError("Die Anfrage muss ein JSON-Objekt enthalten.")
+        unknown = set(payload) - self.UPDATE_FIELDS
+        if unknown:
+            raise InventoryError(f"Unbekanntes Feld: {sorted(unknown)[0]}.")
+        barcode = self._text(payload, "barcode") or None
+        now = self._timestamp()
+        stock = self._stock_values(payload)
+        values = {
+            "name": self._text(payload, "name", required=True),
+            "barcode": barcode,
+            "category": self._text(payload, "category", default="Sonstiges")
+            or "Sonstiges",
+            **stock,
+            "unit": self._text(payload, "unit", default="Stück") or "Stück",
+            "location": self._text(payload, "location"),
+            "minimum_quantity": self._quantity(
+                payload.get("minimum_quantity", 0), "minimum_quantity"
+            )
+            or 0,
+            "notes": self._text(payload, "notes"),
+            "created_at": now,
+            "updated_at": now,
+        }
+        try:
+            return self.repository.create(values)
+        except sqlite3.IntegrityError as error:
+            if "barcode" in str(error).lower():
+                raise InventoryError(
+                    "Dieser Barcode ist bereits einem Artikel zugeordnet.",
+                    status_code=409,
+                    field="barcode",
+                ) from error
+            raise
+
+    def update(self, item_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise InventoryError("Die Anfrage muss ein JSON-Objekt enthalten.")
+        unknown = set(payload) - self.UPDATE_FIELDS
+        if unknown:
+            raise InventoryError(f"Unbekanntes Feld: {sorted(unknown)[0]}.")
+        if not payload:
+            raise InventoryError("Keine Änderungen angegeben.")
+        existing = self.repository.get(item_id)
+        if existing is None:
+            raise InventoryError("Artikel nicht gefunden.", status_code=404)
+        stock_fields = {"tracking_mode", "stock_status", "quantity"}
+        if stock_fields.intersection(payload):
+            values: dict[str, Any] = self._stock_values(payload, existing)
+        else:
+            values = {}
+        for field in payload:
+            if field in {"tracking_mode", "stock_status", "quantity"}:
+                continue
+            if field in self.TEXT_LIMITS:
+                value = self._text(
+                    payload, field, required=(field == "name")
+                )
+                values[field] = (value or None) if field == "barcode" else value
+            else:
+                values[field] = self._quantity(payload[field], field)
+                if values[field] is None:
+                    raise InventoryError("Muss eine Zahl ab 0 sein.", field=field)
+        values["updated_at"] = self._timestamp()
+        try:
+            item = self.repository.update(item_id, values)
+        except sqlite3.IntegrityError as error:
+            if "barcode" in str(error).lower():
+                raise InventoryError(
+                    "Dieser Barcode ist bereits einem Artikel zugeordnet.",
+                    status_code=409,
+                    field="barcode",
+                ) from error
+            raise
+        if item is None:
+            raise InventoryError("Artikel nicht gefunden.", status_code=404)
+        return item
+
+    def delete(self, item_id: int) -> None:
+        if not self.repository.delete(item_id):
+            raise InventoryError("Artikel nicht gefunden.", status_code=404)
