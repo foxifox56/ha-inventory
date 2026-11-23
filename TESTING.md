@@ -18,4 +18,6 @@ Dieses Protokoll wird nach den Prüfungen für den jeweiligen Entwicklungsstand 
 
 Die Ingress-Prüfung simuliert die erlaubte Quell-IP und testet die HTTP-Ablehnung direkter Zugriffe lokal. Sie ersetzt keinen Aufruf durch einen laufenden Home-Assistant-Supervisor. Die Neustartprüfung öffnet denselben SQLite-Datenbestand nach dem Herunterfahren und Neuerstellen des HTTP-Servers; sie ersetzt keinen Container-Neustarttest.
 
+Für den noch fehlenden echten Container-Smoke-Test ist `scripts/container-smoke.sh` eingerichtet und wird über `.github/workflows/ci.yml` für den Pull Request ausgeführt. Der Workflow baut das Image, startet es in einem isolierten Docker-Netz, prüft den Zugriff von `172.30.32.2`, weist einen direkten Zugriff von einer anderen IP ab und kontrolliert den Datenbestand nach einem Container-Neustart über dasselbe `/data`-Volume. Das ist ein isolierter Docker-Test und kein Test auf Home Assistant OS oder mit einem Supervisor.
+
 Die produktive Home-Assistant-Instanz und der Raspberry Pi wurden nicht verändert.

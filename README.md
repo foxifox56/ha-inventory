@@ -56,6 +56,15 @@ python3 -m unittest discover -s backend/tests -v
 node --test frontend/tests/*.test.mjs
 ```
 
+Ein vollständiger Container-Build-/Starttest mit Ingress-Quell-IP und
+Persistenz nach Container-Neustart läuft in GitHub Actions für diesen Pull
+Request. Lokal kannst du ihn mit installiertem Docker aus dem Repository-Root
+ausführen:
+
+```bash
+bash scripts/container-smoke.sh
+```
+
 Siehe [TESTING.md](TESTING.md) für die zuletzt ausgeführten Prüfungen.
 
 ## Projektstruktur
