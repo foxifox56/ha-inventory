@@ -15,7 +15,8 @@ Die folgenden Prüfungen liefen in der Entwicklungsumgebung auf temporären SQLi
 | Konfiguration | `ha_inventory/config.yaml` und `.github/workflows/ci.yml` erfolgreich mit PyYAML geladen. Add-on-Metadaten deklarieren `aarch64` und `amd64`, Version `0.4.0` und `backup: cold`. |
 | Lokale OCR-Funktionsprobe | Synthetischer REWE-Bon wurde mit dem lokal installierten Tesseract tatsächlich erkannt; Multiplikator `2 X MILCH` ergab Menge 2. Lokal ist nur `eng` installiert. Dies ist kein Docker-, `deu`- oder Hardwaretest. |
 | Lokaler Docker-Smoke-Test | **Nicht durchgeführt**: Die Entwicklungsumgebung stellt keine Docker-CLI bereit. |
-| GitHub Actions Push-/PR-Workflows | Für diesen v0.4-Commit noch ausstehend; die echten AMD64-/ARM64-Container-Smokes mit `deu` + `eng` und Tesseract-OCR werden nach dem Push geprüft und hier mit Run-Links dokumentiert. |
+| GitHub Actions Push-Workflow | **Erfolgreich**, [Run #41](https://github.com/foxifox56/ha-inventory/actions/runs/45259928128), Commit `5576ca922f1609d7626f52b1af5cf691d7c476f4`: Backend-/Frontendtests, AMD64- und ARM64-Build-Smokes sowie tatsächliche lokale Tesseract-OCR mit `deu` + `eng`. |
+| GitHub Actions PR-Workflow | **Erfolgreich**, [Run #42](https://github.com/foxifox56/ha-inventory/actions/runs/45260087479), derselbe Commit: Backend-/Frontendtests, AMD64- und ARM64-Build-Smokes sowie tatsächliche lokale Tesseract-OCR mit `deu` + `eng`. |
 
 Befehle aus `ha_inventory/`:
 
@@ -42,7 +43,7 @@ Der CI-Workflow baut und startet das Home Assistant-App-Image getrennt für `lin
 - Dass die reine Erkennung weder Artikel noch Bestand anlegt.
 - Buchung, idempotentes Replay, Undo, Bewegungsverlauf und Persistenz nach Container-Neustart.
 
-Diese Prüfungen belegen die Container-Laufzeit unter den beiden Zielarchitekturen; sie sind keine Raspberry-Pi-, HAOS-Supervisor- oder iPhone-Kameratests. Die konkreten erfolgreichen Workflow-Links und Commit-SHAs werden nach Abschluss der CI hier ergänzt.
+Diese Prüfungen belegen die Container-Laufzeit unter den beiden Zielarchitekturen; sie sind keine Raspberry-Pi-, HAOS-Supervisor- oder iPhone-Kameratests. Push-Run #41 und PR-Run #42 waren auf dem v0.4-Codecommit erfolgreich; beide führten das `receipt-ocr`-Kommando in beiden Architekturen aus. Diese Container-Smokes sind reproduzierbar und enthalten keine echten persönlichen Belege.
 
 ## Manuelle iPhone-Prüfung über Home Assistant Ingress / Nabu Casa
 
@@ -63,8 +64,8 @@ Echter iPhone-, Safari-, Home-Assistant-Ingress- und Nabu-Casa-Test: **nicht dur
 
 - Echter iPhone-Kamera-/Safari-/HA-Ingress-/Nabu-Casa-Test: **nicht durchgeführt**.
 - Echter Raspberry-Pi-4-, HAOS-64-bit- und Supervisor-Installations-/Backup-Test: **nicht durchgeführt**. Es wurde nichts auf einem produktiven System installiert oder geändert.
-- Lokaler Docker-Smoke-Test: **nicht durchgeführt**, weil Docker nicht verfügbar ist. CI-Ergebnisse sind bis zum Abschluss der Workflows ausstehend.
-- Lokale OCR-Probe verwendete nur Englisch (`eng`); `deu` + `eng` wird erst durch den tatsächlichen Containerlauf in GitHub Actions geprüft.
+- Lokaler Docker-Smoke-Test: **nicht durchgeführt**, weil Docker nicht verfügbar ist. Die erfolgreichen Workflow-Läufe #41/#42 sind oben verlinkt.
+- Lokale OCR-Probe verwendete nur Englisch (`eng`); `deu` + `eng` wurde durch die tatsächlichen Containerläufe in GitHub Actions geprüft.
 - Live-OCR mit echten, persönlichen REWE-/Kaufland-Belegen: **nicht durchgeführt**. CI verwendet synthetische Belege; Bonlayouts und Druckqualität variieren.
 - HEIC-Konvertierung hängt vom iOS-Browser ab. Wenn das Foto nicht dekodiert werden kann, muss der Nutzer ein kompatibles Bild wählen oder erneut aufnehmen.
 - OCR, Händlererkennung und schwache Beleg-Fingerprints sind fehlertolerante Vorschläge. Jede Zeile, Menge und Zuordnung muss geprüft werden. Ein Fingerprint kann ähnliche Einkäufe als möglichen Duplikatfall markieren; die UI verlangt dann eine ausdrückliche Entscheidung.
