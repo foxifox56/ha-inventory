@@ -12,8 +12,9 @@ Stand: 23.11.2026 · Branch `development/v0.3`. Automatisierte Tests verwenden t
 | Syntax | `compileall` und `node --check` für App, API-Client, Produkt-Lookup, Scanner, Navigations- und Buchungsmodule bestanden |
 | Home-Assistant-App-Konfiguration | YAML erfolgreich gelesen; Version `0.3.0`, Architekturen `aarch64`/`amd64`, `backup: cold` |
 | Docker lokal | Nicht ausgeführt: Docker-CLI ist in der Entwicklungsumgebung nicht verfügbar |
-| Docker-Smoke-Test in GitHub Actions | Wird für `linux/amd64` und `linux/arm64` nach Branch-Push und PR-Erstellung ausgeführt; der Container-Test bucht, wiederholt idempotent, macht rückgängig und prüft den Verlauf nach Neustart |
-| GitHub Actions Ergebnis | Wird nach dem Branch-Push und PR-Lauf mit den tatsächlichen Workflow-Links ergänzt |
+| Docker-Smoke-Test in GitHub Actions | In den erfolgreichen Runs #23 und #24 für `linux/amd64` und `linux/arm64`; Buchung, idempotentes Replay, Undo und Verlauf nach Neustart geprüft |
+| GitHub Actions Push-Workflow | [Run #23](https://github.com/foxifox56/ha-inventory/actions/runs/45221539257) erfolgreich: Tests sowie AMD64- und ARM64-Container-Smoke bestanden |
+| GitHub Actions PR-Workflow | [Run #24](https://github.com/foxifox56/ha-inventory/actions/runs/45221614596) erfolgreich: Tests sowie AMD64- und ARM64-Container-Smoke bestanden |
 
 Befehle aus `ha_inventory/`:
 
@@ -24,7 +25,7 @@ python3 -m compileall -q backend
 for file in frontend/*.js frontend/*.mjs frontend/vendor/*.mjs; do node --check "$file" || exit 1; done
 ```
 
-GitHub Actions führt die Backend- und Frontendtests sowie den Container-Smoke-Test für `linux/amd64` und `linux/arm64` aus. Ein ARM64-Container-Test ist kein Supervisor- oder Raspberry-Pi-Hardwaretest.
+GitHub Actions führte die Backend- und Frontendtests sowie den Container-Smoke-Test für `linux/amd64` und `linux/arm64` für den Implementierungsstand `2725791` aus. Beide genannten Läufe waren erfolgreich. Ein ARM64-Container-Test ist kein Supervisor- oder Raspberry-Pi-Hardwaretest; die Läufe belegen keinen echten Pi-/Supervisor-Test.
 
 ## Manuelle Testanleitung: iPhone über Ingress und Nabu Casa
 
@@ -46,5 +47,5 @@ Der echte iPhone-Kameratest wurde in dieser Entwicklungsrunde **nicht durchgefü
 - Live-Abfragen bei Open Facts: **nicht durchgeführt**. Provider-Verhalten wurde mit Mocks getestet; echte Rate-Limits, Netzwerkausfälle und Datenqualität hängen vom Anbieter ab.
 - iPhone-Kamera, Safari/In-App-Browser, Home-Assistant-Ingress und Nabu Casa: **nicht durchgeführt**.
 - Installation, Supervisor-Upgrade/Backup und Raspberry Pi 4 mit HAOS 64-bit: **nicht durchgeführt**. Es wurden keine Änderungen am produktiven Home Assistant oder Raspberry Pi vorgenommen.
-- Lokaler Docker-Smoke-Test: **nicht durchgeführt**, weil Docker hier fehlt. AMD64-/ARM64-Smoke-Ergebnisse werden nach GitHub Actions ergänzt.
+- Lokaler Docker-Smoke-Test: **nicht durchgeführt**, weil Docker hier fehlt. Die erfolgreichen AMD64-/ARM64-GitHub-Actions-Ergebnisse sind oben verlinkt.
 - Bewegungen zählen positive ganze Packungen. Produktgrößen wie `1 l` sind keine Mengenumrechnung. Unbekannte Bestände müssen zuerst ausdrücklich initialisiert werden. Beleg-OCR, Offline-PWA und direkte externe API-Zugänge sind nicht Teil von v0.3.
