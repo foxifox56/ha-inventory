@@ -395,7 +395,7 @@ function openBookingDialog(item, requestedAction = 'receive', source = 'manual',
   if (!bookingDialog.open) bookingDialog.showModal();
 }
 
-async function writeMovement(item, action, quantity, source, { initialMode, intent } = {}) {
+async function writeMovement(item, action, quantity, source, { initialMode, intent, beforeSend } = {}) {
   const movementIntent = intent || movementIntents.getOrCreate({
     itemId: item.id, action, quantity, source,
     trackingMode: action === 'initialize' ? (initialMode || 'exact') : '',
@@ -407,6 +407,7 @@ async function writeMovement(item, action, quantity, source, { initialMode, inte
   const result = await api(`items/${item.id}/movements`, {
     method: 'POST',
     body: JSON.stringify(payload),
+    beforeSend,
   });
   if (!result?.movement) throw new Error('Die Serverantwort war unvollständig; Ergebnis bitte sicher erneut abgleichen.');
   movementIntents.complete(movementIntent);
@@ -425,7 +426,9 @@ function movementMessage(item, movement) {
 }
 
 async function consumeFromScan(item, quantity, request) {
-  if (request && !scanRequestGuard.isCurrent(request, $('#scan-mode').value)) return;
+  const beforeSend = () => $('#scan-mode').value === 'consume'
+    && (!request || scanRequestGuard.isCurrent(request, $('#scan-mode').value));
+  if (!beforeSend()) return;
   if (!hasKnownCount(item)) {
     $('#camera-status').textContent = `${item.name}: Der Zahlenbestand ist unbekannt. Es wurde nichts abgezogen. Öffne „Einlagern“, um einen Startbestand festzulegen.`;
     $('#camera-status').hidden = false;
@@ -439,7 +442,10 @@ async function consumeFromScan(item, quantity, request) {
   });
   pendingScanBooking = { item, quantity: intendedQuantity, intent };
   try {
-    const movement = await writeMovement(item, 'consume', intendedQuantity, 'barcode', { intent });
+    const movement = await writeMovement(item, 'consume', intendedQuantity, 'barcode', {
+      intent,
+      beforeSend,
+    });
     pendingScanBooking = undefined;
     $('#retry-scan-booking').hidden = true;
     await loadItems();

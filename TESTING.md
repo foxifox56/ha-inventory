@@ -7,14 +7,14 @@ Stand: 23.11.2026 · Branch `development/v0.3`. Automatisierte Tests verwenden t
 | Prüfung | Umfang und Ergebnis |
 | --- | --- |
 | Backendtests | 59 Tests bestanden: v1-API, Ingress und Schreibsitzung, Produkt-Lookup, Bewegungsservice, Idempotenz, parallele Scans, negativer Bestand, bestätigter Nullbestand, Undo-Regeln und Fehlerbehandlung |
-| Frontendtests | 34 Tests bestanden: Produkt-Lookup, Bestandsschutz, Scan-Modi, Moduswechsel während laufender Suche, Mengenvalidierung ohne Rundung, persistente Idempotenzschlüssel für Buchung/Undo und Kameraadapter |
+| Frontendtests | 36 Tests bestanden: Produkt-Lookup, Bestandsschutz, Scan-Modi, Abbruch veralteter Lookups, Prüfung des bestätigten Modus direkt vor der Mutation (auch nach Schreibsitzungs-Refresh), Mengenvalidierung ohne Rundung, persistente Idempotenzschlüssel für Buchung/Undo und Kameraadapter |
 | Rückwärtskompatibilität | v1-/v3-Altstände, v4→v5→v6 und v5→v6; Artikelwerte sowie vorhandene Bewegungs-IDs, Idempotenzschlüssel und Undo-Referenzen bleiben erhalten |
 | Syntax | `compileall` und `node --check` für App, API-Client, Produkt-Lookup, Scanner, Navigations- und Buchungsmodule bestanden |
 | Home-Assistant-App-Konfiguration | YAML erfolgreich gelesen; Version `0.3.0`, Architekturen `aarch64`/`amd64`, `backup: cold` |
 | Docker lokal | Nicht ausgeführt: Docker-CLI ist in der Entwicklungsumgebung nicht verfügbar |
 | Docker-Smoke-Test in GitHub Actions | Erfolgreich auf `linux/amd64` und `linux/arm64`; umfasst Buchung, idempotentes Replay, Undo und Verlauf nach Neustart |
-| GitHub Actions Push-Workflow | [Run #29](https://github.com/foxifox56/ha-inventory/actions/runs/45234883448) erfolgreich für Commit `981a3f6`: Tests sowie AMD64- und ARM64-Container-Smoke bestanden |
-| GitHub Actions PR-Workflow | [Run #30](https://github.com/foxifox56/ha-inventory/actions/runs/45234897364) erfolgreich für Commit `981a3f6`: Tests sowie AMD64- und ARM64-Container-Smoke bestanden |
+| GitHub Actions Push-Workflow | [Run #31](https://github.com/foxifox56/ha-inventory/actions/runs/45235207928) erfolgreich für Commit `30d3a50`: Tests sowie AMD64- und ARM64-Container-Smoke bestanden. Der zusätzliche Mutation-Preflight wird mit dem nächsten Push erneut ausgeführt. |
+| GitHub Actions PR-Workflow | [Run #32](https://github.com/foxifox56/ha-inventory/actions/runs/45235217902) erfolgreich für Commit `30d3a50`: Tests sowie AMD64- und ARM64-Container-Smoke bestanden. Der zusätzliche Mutation-Preflight wird mit dem nächsten Push erneut ausgeführt. |
 
 Befehle aus `ha_inventory/`:
 
@@ -25,7 +25,7 @@ python3 -m compileall -q backend
 for file in frontend/*.js frontend/*.mjs frontend/vendor/*.mjs; do node --check "$file" || exit 1; done
 ```
 
-Die lokalen Tests wurden nach den Review-Korrekturen ausgeführt. Die GitHub-Actions-Runs #29 und #30 prüften den Korrekturstand `981a3f6` einschließlich Backend-/Frontendtests und Container-Smokes für `linux/amd64` und `linux/arm64`. Ein ARM64-Container-Test ist kein Supervisor- oder Raspberry-Pi-Hardwaretest; er belegt keinen echten Pi-/Supervisor-Test.
+Die lokalen Tests wurden nach den Review-Korrekturen einschließlich Mutation-Preflight ausgeführt. Die GitHub-Actions-Runs #31 und #32 prüften den vorherigen Korrekturstand `30d3a50`; der neue Preflight-Test wird nach dem aktuellen Push erneut geprüft. Ein ARM64-Container-Test ist kein Supervisor- oder Raspberry-Pi-Hardwaretest; er belegt keinen echten Pi-/Supervisor-Test.
 
 ## Manuelle Testanleitung: iPhone über Ingress und Nabu Casa
 
