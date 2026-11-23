@@ -38,7 +38,7 @@ bash scripts/container-smoke.sh
 INVENTORY_SMOKE_PLATFORM=linux/arm64 bash scripts/container-smoke.sh
 ```
 
-Die GitHub-Actions-Ergebnisse für diesen Änderungsstand werden nach dem Push ergänzt. Der vorherige v0.2-Stand bestand im Workflow-Lauf [#10](https://github.com/foxifox56/ha-inventory/actions/runs/45182976094); dieser ältere Lauf deckt die neue Produkterkennung noch nicht ab.
+Der aktuelle Stand dieses Commits bestand im PR-Workflow [#12](https://github.com/foxifox56/ha-inventory/actions/runs/45193270940) und im Push-Workflow [#11](https://github.com/foxifox56/ha-inventory/actions/runs/45193260744). Beide liefen erfolgreich: Backend- und Frontendtests sowie Docker-Build und Smoke-Test für AMD64 und ARM64. Der lokale Docker-Smoke-Test war nicht verfügbar, da die Docker-CLI in dieser Entwicklungsumgebung nicht installiert ist.
 
 ## Manueller Ende-zu-Ende-Test auf einem iPhone
 
