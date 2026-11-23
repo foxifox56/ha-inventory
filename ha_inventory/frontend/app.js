@@ -585,6 +585,11 @@ async function lookupBarcode(rawBarcode) {
         $('#camera-status').hidden = false;
         return;
       }
+      if (currentMode === 'receive' && parseScanQuantity($('#scan-quantity').value) === null) {
+        $('#camera-status').textContent = 'Gib eine ganze Packungszahl größer 0 ein. Das Produkt wurde nicht zur Erfassung geöffnet.';
+        $('#camera-status').hidden = false;
+        return;
+      }
       pendingCreateBooking = currentMode === 'receive';
       closeScanDialog();
       openNewItem(barcode, product);
@@ -594,6 +599,11 @@ async function lookupBarcode(rawBarcode) {
       const currentMode = $('#scan-mode').value;
       if (currentMode === 'consume') {
         $('#camera-status').textContent = 'Kein gespeicherter Lagerartikel gefunden. Im Verbrauchsmodus wird nichts angelegt oder verändert. Wechsle zu „Ansehen“ oder „Einlagern“. ';
+        $('#camera-status').hidden = false;
+        return;
+      }
+      if (currentMode === 'receive' && parseScanQuantity($('#scan-quantity').value) === null) {
+        $('#camera-status').textContent = 'Gib eine ganze Packungszahl größer 0 ein. Der Artikel wurde nicht zur Erfassung geöffnet.';
         $('#camera-status').hidden = false;
         return;
       }
@@ -633,14 +643,20 @@ async function lookupBarcode(rawBarcode) {
 }
 
 function openManualEntryFromScan() {
-  if ($('#scan-mode').value === 'consume') {
+  const mode = $('#scan-mode').value;
+  if (mode === 'consume') {
     showToast('Im Verbrauchsmodus werden unbekannte Codes nicht angelegt. Wechsle zu „Ansehen“ oder „Einlagern“.');
+    return;
+  }
+  if (mode === 'receive' && parseScanQuantity($('#scan-quantity').value) === null) {
+    $('#camera-status').textContent = 'Gib eine ganze Packungszahl größer 0 ein. Es wurde nichts angelegt oder gebucht.';
+    $('#camera-status').hidden = false;
     return;
   }
   const barcode = $('#scan-input').value.trim();
   scanRequestGuard.invalidate();
   lookupAbortController?.abort();
-  pendingCreateBooking = $('#scan-mode').value === 'receive';
+  pendingCreateBooking = mode === 'receive';
   closeScanDialog();
   openNewItem(barcode);
 }

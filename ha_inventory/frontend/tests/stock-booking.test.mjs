@@ -118,6 +118,7 @@ test('undo requests retain their key until the response is confirmed', () => {
 
 test('scan booking quantities reject fractions, negatives, and unsafe values without rounding', () => {
   assert.equal(parseScanQuantity('3'), 3);
+  assert.equal(parseScanQuantity('03'), 3);
   for (const value of ['', '0', '-1', '2.8', '1e2', '9007199254740992']) {
     assert.equal(parseScanQuantity(value), null, `expected ${value} to be invalid`);
   }
