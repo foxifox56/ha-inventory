@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f5f7f8" />
+    <title>HA Inventory</title>
+    <base href="./" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <a class="brand" href="./" aria-label="HA Inventory Startseite">
+          <span class="brand-mark" aria-hidden="true">▦</span>
+          <span>ha<span class="brand-light">inventory</span></span>
+        </a>
+        <span class="local-pill"><span></span> Lokal gespeichert</span>
+      </header>
+
+      <main>
+        <section class="hero">
+          <div>
+            <p class="eyebrow">DEIN ZUHAUSE. DEIN ÜBERBLICK.</p>
+            <h1>Was haben wir noch da?</h1>
+            <p class="hero-copy">Finde es schnell heraus. Ganz ohne jeden Griff mitzuzählen.</p>
+          </div>
+          <div class="hero-actions">
+            <button class="button button-quiet" id="scan-button" type="button">
+              <span aria-hidden="true">▤</span> Barcode scannen
+            </button>
+            <button class="button button-primary" id="add-button" type="button">
+              <span aria-hidden="true">＋</span> Artikel anlegen
+            </button>
+          </div>
+        </section>
+
+        <section class="summary" aria-label="Bestandsübersicht">
+          <article class="summary-card">
+            <span class="summary-icon indigo" aria-hidden="true">▦</span>
+            <div><span class="summary-label">Artikel</span><strong id="stat-items">0</strong></div>
+          </article>
+          <article class="summary-card">
+            <span class="summary-icon amber" aria-hidden="true">⌁</span>
+            <div><span class="summary-label">Wird knapp</span><strong id="stat-low">0</strong></div>
+          </article>
+          <article class="summary-card">
+            <span class="summary-icon mint" aria-hidden="true">⌖</span>
+            <div><span class="summary-label">Lagerorte</span><strong id="stat-locations">0</strong></div>
+          </article>
+        </section>
+
+        <section class="inventory-panel">
+          <div class="panel-heading">
+            <div>
+              <h2>Dein Bestand</h2>
+              <p id="result-count">Noch keine Artikel erfasst</p>
+            </div>
+            <label class="search-box">
+              <span aria-hidden="true">⌕</span>
+              <input id="search-input" type="search" placeholder="Artikel suchen …" autocomplete="off" />
+              <kbd>/</kbd>
+            </label>
+          </div>
+          <nav class="filters" id="category-filters" aria-label="Kategorien"></nav>
+          <div class="item-list" id="item-list" aria-live="polite"></div>
+          <div class="empty-state" id="empty-state" hidden>
+            <div class="empty-icon" aria-hidden="true">▦</div>
+            <h3 id="empty-title">Dein Lager ist noch leer</h3>
+            <p id="empty-copy">Lege deinen ersten Artikel an oder scanne seinen Barcode.</p>
+            <button class="button button-primary" id="empty-add-button" type="button">Ersten Artikel anlegen</button>
+          </div>
+        </section>
+        <p class="quiet-note"><span>✳</span> Dein Bestand ändert sich nur, wenn du ihn selbst anpasst.</p>
+      </main>
+      <footer>HA Inventory <span>·</span> Version 0.1 <span>·</span> Deine Daten bleiben bei dir</footer>
+    </div>
+
+    <dialog id="item-dialog" class="dialog">
+      <form id="item-form" method="dialog">
+        <div class="dialog-heading">
+          <div>
+            <p class="eyebrow">ARTIKELVERWALTUNG</p>
+            <h2 id="form-title">Neuer Artikel</h2>
+          </div>
+          <button class="icon-button" id="close-item-dialog" type="button" aria-label="Schließen">×</button>
+        </div>
+        <input id="item-id" type="hidden" />
+        <label class="field full-field">Artikelname <span>*</span>
+          <input id="item-name" name="name" required maxlength="160" placeholder="z. B. Olivenöl" />
+        </label>
+        <label class="field full-field">Barcode <span class="optional">optional</span>
+          <input id="item-barcode" name="barcode" maxlength="64" inputmode="numeric" placeholder="Code eintippen oder scannen" />
+        </label>
+        <div class="form-grid">
+          <label class="field">Kategorie
+            <input id="item-category" name="category" list="category-options" maxlength="80" placeholder="Sonstiges" />
+            <datalist id="category-options">
+              <option>Lebensmittel</option><option>Werkzeuge</option><option>Haushalt</option><option>Sonstiges</option>
+            </datalist>
+          </label>
+          <label class="field">Lagerort
+            <input id="item-location" name="location" maxlength="160" placeholder="z. B. Vorratskammer" />
+          </label>
+          <label class="field">Bestand
+            <input id="item-quantity" name="quantity" type="number" min="0" step="any" value="1" required />
+          </label>
+          <label class="field">Einheit
+            <input id="item-unit" name="unit" maxlength="40" value="Stück" placeholder="Stück, kg, Packung …" />
+          </label>
+          <label class="field">Mindestbestand <span class="optional">optional</span>
+            <input id="item-minimum" name="minimum_quantity" type="number" min="0" step="any" value="0" required />
+          </label>
+          <label class="field full-field">Notiz <span class="optional">optional</span>
+            <textarea id="item-notes" name="notes" maxlength="1000" rows="2" placeholder="Zusätzliche Infos …"></textarea>
+          </label>
+        </div>
+        <p class="form-error" id="form-error" role="alert" hidden></p>
+        <div class="dialog-actions">
+          <button class="button button-quiet" id="cancel-item" type="button">Abbrechen</button>
+          <button class="button button-primary" type="submit">Artikel speichern</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="scan-dialog" class="dialog scan-dialog">
+      <div class="dialog-heading">
+        <div><p class="eyebrow">SCHNELLER ZUGRIFF</p><h2>Barcode scannen</h2></div>
+        <button class="icon-button" id="close-scan-dialog" type="button" aria-label="Schließen">×</button>
+      </div>
+      <p class="scan-copy">Scanne einen Artikel, um ihn zu finden oder neu anzulegen. Dabei wird der Bestand nicht verändert.</p>
+      <div class="camera-wrap" id="camera-wrap" hidden>
+        <video id="camera-video" playsinline muted></video>
+        <span class="scan-frame" aria-hidden="true"></span>
+      </div>
+      <p class="camera-status" id="camera-status" hidden></p>
+      <button class="button button-quiet camera-button" id="camera-button" type="button" hidden>▣ Kamera öffnen</button>
+      <label class="field full-field scan-field">Barcode eingeben oder Scanner verwenden
+        <div class="scan-input-row">
+          <input id="scan-input" autocomplete="off" inputmode="numeric" placeholder="Barcode …" />
+          <button class="button button-primary" id="lookup-button" type="button">Suchen</button>
+        </div>
+      </label>
+      <p class="scan-hint">Tipp: Ein Bluetooth- oder USB-Scanner funktioniert wie eine Tastatur. Bestätige danach mit Enter.</p>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="app.js" defer></script>
+  </body>
+</html>

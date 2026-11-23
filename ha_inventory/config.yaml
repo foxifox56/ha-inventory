@@ -1,0 +1,18 @@
+name: "HA Inventory"
+version: "0.1.0"
+slug: "ha-inventory"
+description: "Lokale Lagerverwaltung mit Barcode-Suche und manuell gepflegtem Bestand."
+url: "https://github.com/foxifox56/ha-inventory/tree/development/v0.1/ha_inventory"
+arch:
+  - aarch64
+  - armv7
+  - amd64
+startup: application
+boot: auto
+stage: experimental
+ingress: true
+ingress_port: 8099
+panel_icon: mdi:barcode-scan
+map:
+  - type: data
+    read_only: false
