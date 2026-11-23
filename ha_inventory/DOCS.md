@@ -12,15 +12,16 @@ Die App unterstützt `aarch64` und `amd64`. Auf dem Raspberry Pi 4 ist Home Assi
 
 - Auf Smartphones führt die untere Navigation zu **Start**, **Suche**, **Scanner** und **Lagerorte**. Artikel erscheinen als Karten; auf größeren Bildschirmen bleibt die vollständige Bestandsansicht verfügbar.
 - Das Farbschema folgt der Systemeinstellung für den Dark Mode. Bedienelemente sind für Touch vergrößert.
-- Ein bekannter Barcode öffnet Artikeldetails. Bei unbekannten Codes sucht das Backend zunächst lokal und danach über Open Facts; gefundene Name-, Marken-, Packungsgrößen-, Kategorie- und Bilddaten werden als editierbare Vorschläge angezeigt. Ohne ausdrücklich bestätigtes Speichern wird nichts angelegt und der Bestand nie verändert.
-- Open Facts ist freiwillig gepflegt; Angaben können fehlen oder falsch sein. Der Barcode wird per HTTPS an die gemeinsame Produkt-API gesendet. Bei Offline-/Timeout-/Rate-Limit-Fehlern bleibt die manuelle Erfassung mit Barcode offen. Datenquelle und Bildlizenz werden in der Oberfläche angezeigt.
+- Ein bekannter numerischer oder alphanumerischer Artikelcode öffnet Artikeldetails. Jeder unbekannte Code wird zuerst lokal geprüft; nur unbekannte numerische Codes werden an Open Facts gesendet. Alphanumerische Codes öffnen direkt die manuelle Erfassung.
+- Erkannte Name-, Marken-, Packungsgrößen-, Kategorie- und Bilddaten erscheinen als bearbeitbare Vorschläge. Ohne ausdrücklich bestätigtes Speichern wird nichts angelegt und der Bestand nie verändert.
+- Open Facts ist freiwillig gepflegt; Angaben können fehlen oder falsch sein. Der Barcode wird per HTTPS an die gemeinsame Produkt-API gesendet. Bei zu schnellen Folgeabfragen zeigt die App einen Status und versucht höchstens zweimal innerhalb von 12 Sekunden erneut. Der Wartevorgang ist abbrechbar; bei Offline-/Timeout-/Rate-Limit-Fehlern gibt es die Optionen „Erneut versuchen“ und „Manuell erfassen“. Datenquelle und Bildlizenz werden in der Oberfläche angezeigt.
 - ZXing öffnet die rückwärtige Kamera, sofern der Browser einen sicheren Kontext, Kamerazugriff und die nötigen Browserfunktionen bereitstellt. iOS/Safari wurde hier nicht auf echter Hardware getestet. Bei Problemen kannst du einen Code manuell eingeben oder einen Bluetooth-/USB-Scanner wie eine Tastatur verwenden.
 - Artikel haben eine von ihrem optionalen Barcode unabhängige SQLite-ID. Kategorien und Lagerorte sind frei benennbar und werden als Werte aus Artikeln abgeleitet.
 - Das Bestandsmodell `simple` hält unbekannt/vorhanden/nicht vorhanden fest; `inventory` verwaltet Schätzmengen; `exact` verwaltet manuell gezählte Mengen. Eine leere Menge bedeutet unbekannt, eine erfasste `0` bedeutet Nullbestand.
 
 ## REST API und Sicherheit
 
-Neue API-Clients verwenden `/api/v1`. `GET /api/v1/product-lookup/{barcode}` ist lokal-first und lesend; mögliche Ergebnisse sind `local`, `identified`, `not_found` oder `unavailable`. Siehe [REST-API-Referenz](../docs/API.md). Die Artikeldatenbank bleibt in `/data/inventory.sqlite3`; Browser und andere Anwendungen verwenden die REST-API und greifen nicht direkt auf SQLite zu.
+Neue API-Clients verwenden `/api/v1`. `GET /api/v1/product-lookup/{barcode}` ist lokal-first und lesend; mögliche Ergebnisse sind `local`, `identified`, `not_found`, `rate_limited` oder `unavailable`. Siehe [REST-API-Referenz](../docs/API.md). Die Artikeldatenbank bleibt in `/data/inventory.sqlite3`; Browser und andere Anwendungen verwenden die REST-API und greifen nicht direkt auf SQLite zu.
 
 Home Assistant Ingress authentifiziert Benutzer. Der Server nimmt nur Anfragen vom Supervisor-Proxy `172.30.32.2` an. Lesezugriffe benötigen keine zusätzliche Schreibsitzung; `POST`, `PATCH` und `DELETE` benötigen ein zusätzliches kurzlebiges Token aus `GET /api/v1/write-session`. Dieses Token bleibt innerhalb der Ingress-Grenze und ist kein externer API-Schlüssel. CORS und ein direkter externer API-Zugang sind nicht freigeschaltet.
 
@@ -37,6 +38,6 @@ Schema-Upgrades behalten Artikelmetadaten und vorhandene IDs bei. Migration v4 f
 - **Kamera nicht verfügbar:** Prüfe HTTPS, die Kameraberechtigung und den Browser. Verwende alternativ manuelle Eingabe oder einen Tastatur-Scanner.
 - **Artikelliste leer:** Beim ersten Start ist das Lager leer. Lege einen Artikel an oder suche/scanne einen Barcode.
 - **Schreibzugriff abgelehnt:** Öffne die Oberfläche erneut über Home-Assistant-Ingress. Schreibsitzungen laufen nach einer Stunde ab und werden nicht in URLs abgelegt.
-- **Produktsuche findet nichts oder ist offline:** Der Barcode bleibt im Artikelformular; Produktfelder können manuell ausgefüllt werden.
+- **Produktsuche findet nichts oder ist offline:** Unbekannte alphanumerische Codes gehen direkt in die manuelle Erfassung. Bei unbekannten numerischen Codes bleiben bei einem Treffer Vorschläge editierbar; bei Ausfall stehen „Erneut versuchen“ und „Manuell erfassen“ bereit. Ein Rate-Limit wartet nur begrenzt im Browser und blockiert keinen Backend-Worker.
 - **App startet nicht:** Prüfe die App-Protokolle. Der erste Container-Build auf dem Gerät kann länger dauern.
 - **Daten behalten:** Deinstalliere die App nicht, wenn die Daten erhalten bleiben sollen. Erstelle vor Änderungen ein Home-Assistant-Backup.

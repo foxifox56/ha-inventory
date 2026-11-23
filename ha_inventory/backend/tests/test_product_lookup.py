@@ -185,15 +185,50 @@ class ProductLookupProviderTests(unittest.TestCase):
             opener=FakeOpener(FakeResponse({"status": 0})), min_request_interval=4.1, clock=lambda: 10.0
         )
         self.assertIsNone(provider.lookup("0015"))
-        with self.assertRaises(ProductLookupRateLimited):
+        with self.assertRaises(ProductLookupRateLimited) as rate_limited:
             provider.lookup("0016")
+        self.assertAlmostEqual(rate_limited.exception.retry_after_seconds, 4.1)
 
         overloaded = OpenFactsProvider(
             opener=FakeOpener(error=HTTPError("https://world.openfoodfacts.org", 503, "busy", {}, None)),
             min_request_interval=0,
         )
-        with self.assertRaises(ProductLookupRateLimited):
+        with self.assertRaises(ProductLookupUnavailable):
             overloaded.lookup("0017")
+
+    def test_upstream_429_retry_after_is_exposed_to_the_client(self):
+        provider = OpenFactsProvider(
+            opener=FakeOpener(error=HTTPError(
+                "https://world.openfoodfacts.org", 429, "busy", {"Retry-After": "7"}, None
+            )),
+            min_request_interval=0,
+        )
+        with self.assertRaises(ProductLookupRateLimited) as rate_limited:
+            provider.lookup("0018")
+        self.assertEqual(rate_limited.exception.retry_after_seconds, 7)
+
+    def test_fast_sequential_lookups_can_retry_without_exceeding_the_interval(self):
+        now = [0.0]
+        opener = FakeOpener(FakeResponse({"status": 0, "product": None}))
+        provider = OpenFactsProvider(
+            opener=opener,
+            min_request_interval=4.1,
+            clock=lambda: now[0],
+        )
+        requested_codes = []
+        for barcode in ("000101", "000102", "000103"):
+            while True:
+                try:
+                    self.assertIsNone(provider.lookup(barcode))
+                    requested_codes.append(barcode)
+                    break
+                except ProductLookupRateLimited as error:
+                    # This is the bounded client backoff driven by the API's
+                    # retry_after_seconds response; it never sleeps in backend.
+                    now[0] += error.retry_after_seconds
+        self.assertEqual(requested_codes, ["000101", "000102", "000103"])
+        self.assertEqual(len(opener.requests), 3)
+        self.assertGreaterEqual(now[0], 8.2)
 
     def test_redirect_urls_are_limited_to_https_open_facts_api_hosts(self):
         _validate_api_url("https://world.openbeautyfacts.org/api/v3/product/001.json")
@@ -245,6 +280,44 @@ class ProductLookupProviderTests(unittest.TestCase):
         self.assertEqual(result["status"], "identified")
         self.assertEqual(result["product"]["data_source"], "Tools Catalog")
         self.assertEqual(result["product"]["barcode"], "00052")
+
+    def test_local_alphanumeric_code_is_checked_before_numeric_provider_filter(self):
+        class ShouldNotBeCalled:
+            name = "numeric-provider"
+            calls = 0
+
+            def lookup(self, _barcode):
+                self.calls += 1
+                raise AssertionError("Open Facts must not receive an alphanumeric code")
+
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as directory:
+            database = Database(Path(directory))
+            database.initialize()
+            inventory = InventoryService(InventoryRepository(database))
+            item = inventory.create({
+                "name": "Akkuschrauber",
+                "barcode": "TOOL-001",
+                "tracking_mode": "exact",
+                "quantity": 3,
+                "stock_status": "known",
+            })
+            provider = ShouldNotBeCalled()
+            lookup = ProductLookupService(inventory, [provider])
+
+            found = lookup.lookup("TOOL-001")
+            unknown = lookup.lookup("TOOL-002")
+            stored = inventory.get(item["id"])
+
+        self.assertEqual(found["status"], "local")
+        self.assertEqual(found["item"]["id"], item["id"])
+        self.assertEqual(unknown, {"status": "not_found", "barcode": "TOOL-002"})
+        self.assertEqual(provider.calls, 0)
+        self.assertEqual(stored["barcode"], "TOOL-001")
+        self.assertEqual(stored["quantity"], 3)
+        self.assertEqual(stored["stock_status"], "known")
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import mimetypes
 import secrets
 import threading
@@ -13,7 +14,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from ..errors import InventoryError
 from ..inventory.service import InventoryService
-from ..product_lookup.provider import ProductLookupError
+from ..product_lookup.provider import ProductLookupError, ProductLookupRateLimited
 
 
 FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
@@ -124,6 +125,19 @@ class InventoryRequestHandler(BaseHTTPRequestHandler):
                 self._json_response(200, result)
             except InventoryError as error:
                 self._inventory_error(error)
+            except ProductLookupRateLimited as error:
+                retry_after = error.retry_after_seconds
+                self._json_response(
+                    429,
+                    {
+                        "code": "product_lookup_rate_limited",
+                        "status": "rate_limited",
+                        "barcode": barcode,
+                        "retry_after_seconds": retry_after,
+                        "error": str(error),
+                    },
+                    extra_headers={"Retry-After": str(max(1, math.ceil(retry_after)))},
+                )
             except ProductLookupError as error:
                 self._json_response(
                     503,
@@ -242,7 +256,13 @@ class InventoryRequestHandler(BaseHTTPRequestHandler):
             body["field"] = error.field
         self._json_response(error.status_code, body)
 
-    def _json_response(self, status: int, body: dict[str, object]) -> None:
+    def _json_response(
+        self,
+        status: int,
+        body: dict[str, object],
+        *,
+        extra_headers: dict[str, str] | None = None,
+    ) -> None:
         encoded = json.dumps(body, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -251,6 +271,8 @@ class InventoryRequestHandler(BaseHTTPRequestHandler):
         self.send_header("X-HA-Inventory-API-Version", API_VERSION)
         self.send_header("Vary", "Origin")
         self._security_headers()
+        for name, value in (extra_headers or {}).items():
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(encoded)
 

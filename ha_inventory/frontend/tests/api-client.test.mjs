@@ -66,3 +66,19 @@ test('a repeated invalid token is not retried more than once', async () => {
   assert.equal(sessions, 2);
   assert.equal(writes, 2);
 });
+
+test('rate-limit retry guidance is carried to the lookup flow', async () => {
+  const client = createApiClient(async () => response(429, {
+    code: 'product_lookup_rate_limited',
+    status: 'rate_limited',
+    retry_after_seconds: 4.1,
+    error: 'Open Facts begrenzt Anfragen gerade.',
+  }), 'https://home-assistant.example/ingress/api/v1/');
+
+  await assert.rejects(client.request('product-lookup/0001'), (error) => {
+    assert.equal(error.status, 429);
+    assert.equal(error.code, 'product_lookup_rate_limited');
+    assert.equal(error.retryAfterSeconds, 4.1);
+    return true;
+  });
+});

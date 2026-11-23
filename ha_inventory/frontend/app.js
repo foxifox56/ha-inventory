@@ -24,6 +24,8 @@ let scannerControls;
 let scannerBusy = false;
 let activeDetailItem;
 let barcodeLookupInProgress = false;
+let lookupAbortController;
+let lookupFailed = false;
 let itemSaveInProgress = false;
 
 function escapeHtml(value) {
@@ -294,15 +296,25 @@ function closeScanDialog() {
 
 async function lookupBarcode(rawBarcode) {
   if (barcodeLookupInProgress) return;
+  const barcode = String(rawBarcode ?? '').trim();
+  if (!barcode) {
+    $('#scan-input').focus();
+    return;
+  }
   barcodeLookupInProgress = true;
-  const result = await lookupBarcodeValue(rawBarcode, async (barcode) => {
-    return api(`product-lookup/${encodeURIComponent(barcode)}`);
+  lookupFailed = false;
+  const controller = new AbortController();
+  lookupAbortController = controller;
+  const result = await lookupBarcodeValue(barcode, async (code, { signal }) => {
+    return api(`product-lookup/${encodeURIComponent(code)}`, { signal });
   }, {
-    pending: () => {
+    pending: (code) => {
+      $('#scan-input').value = code;
       $('#lookup-button').disabled = true;
       $('#lookup-button').textContent = 'Suche …';
       $('#camera-status').textContent = 'Artikel und Produktdaten werden gesucht …';
       $('#camera-status').hidden = false;
+      $('#manual-entry-button').hidden = false;
     },
     found: (item) => {
       closeScanDialog();
@@ -317,20 +329,38 @@ async function lookupBarcode(rawBarcode) {
       openNewItem(barcode);
     },
     failed: (error, barcode) => {
-      closeScanDialog();
-      showToast(`Produktsuche nicht verfügbar: ${error.message} Du kannst den Artikel selbst erfassen.`);
-      openNewItem(barcode);
+      lookupFailed = true;
+      stopCamera();
+      $('#scan-input').value = barcode;
+      $('#camera-status').textContent = `Produktsuche nicht verfügbar: ${error.message} Du kannst es erneut versuchen oder den Artikel manuell erfassen.`;
+      $('#camera-status').hidden = false;
+      $('#manual-entry-button').hidden = false;
+    },
+    waiting: (_barcode, retryAfterSeconds, attempt) => {
+      const seconds = Math.max(1, Math.ceil(retryAfterSeconds));
+      $('#camera-status').textContent = `Open Facts begrenzt Anfragen gerade. Automatischer erneuter Versuch in etwa ${seconds} Sekunden (Versuch ${attempt}). Manuelle Erfassung ist jederzeit möglich.`;
+      $('#camera-status').hidden = false;
+      $('#manual-entry-button').hidden = false;
+    },
+    cancelled: () => {
+      // The manual-entry action or dialog close owns the next UI state.
     },
     settled: () => {
       barcodeLookupInProgress = false;
+      if (lookupAbortController === controller) lookupAbortController = undefined;
       $('#lookup-button').disabled = false;
-      $('#lookup-button').textContent = 'Suchen';
+      $('#lookup-button').textContent = lookupFailed ? 'Erneut versuchen' : 'Suchen';
+      if (!lookupFailed) $('#manual-entry-button').hidden = true;
     },
-  });
-  if (result.outcome === 'empty') {
-    barcodeLookupInProgress = false;
-    $('#scan-input').focus();
-  }
+  }, { signal: controller.signal, maxRetries: 2, maxWaitMs: 12000 });
+  if (result.outcome === 'empty') $('#scan-input').focus();
+}
+
+function openManualEntryFromScan() {
+  const barcode = $('#scan-input').value.trim();
+  lookupAbortController?.abort();
+  closeScanDialog();
+  openNewItem(barcode);
 }
 
 async function startCamera() {
@@ -387,6 +417,9 @@ function setView(view, { focusSearch = false } = {}) {
     scanReturnView = activeView;
     $('#scan-input').value = '';
     $('#camera-status').hidden = true;
+    $('#manual-entry-button').hidden = true;
+    $('#lookup-button').disabled = false;
+    $('#lookup-button').textContent = 'Suchen';
     scanDialog.showModal();
     setActiveTab('scanner');
     setTimeout(() => $('#camera-button').hidden ? $('#scan-input').focus() : $('#camera-button').focus(), 60);
@@ -444,6 +477,7 @@ $('#detail-edit-button').addEventListener('click', () => {
 $('#close-scan-dialog').addEventListener('click', closeScanDialog);
 $('#camera-button').addEventListener('click', startCamera);
 $('#lookup-button').addEventListener('click', () => lookupBarcode($('#scan-input').value));
+$('#manual-entry-button').addEventListener('click', openManualEntryFromScan);
 $('#scan-input').addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {
     event.preventDefault();
@@ -530,7 +564,10 @@ form.addEventListener('submit', async (event) => {
   }
 });
 
-scanDialog.addEventListener('close', stopCamera);
+scanDialog.addEventListener('close', () => {
+  lookupAbortController?.abort();
+  stopCamera();
+});
 scanDialog.addEventListener('close', () => setActiveTab(scanReturnView));
 document.addEventListener('keydown', (event) => {
   if (event.key === '/' && !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) {

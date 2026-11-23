@@ -126,6 +126,15 @@ class DatabaseMigrationTests(unittest.TestCase):
                        27, 'Dübel', '00027', 'Werkzeuge', 12, 'Stück', 'Werkstatt',
                        3, 'Bestätigter Bestand', '2026-11-20T00:00:00Z',
                        '2026-11-21T00:00:00Z', 'exact', 'known'
+                   );
+                   INSERT INTO inventory_items (
+                       id, name, barcode, category, quantity, unit, location,
+                       minimum_quantity, notes, created_at, updated_at, tracking_mode,
+                       stock_status
+                   ) VALUES (
+                       28, 'Akkuschrauber', 'TOOL-001', 'Werkzeuge', 4.5, 'Stück', 'Garage',
+                       1, 'Alphanumerischer Bestand', '2026-11-20T00:00:00Z',
+                       '2026-11-22T00:00:00Z', 'inventory', 'known'
                    );"""
             )
         finally:
@@ -144,3 +153,12 @@ class DatabaseMigrationTests(unittest.TestCase):
         self.assertEqual(migrated["product_size"], "")
         self.assertEqual(migrated["image_url"], "")
         self.assertEqual(migrated["image_license"], "")
+
+        migrated_alpha = InventoryService(InventoryRepository(database)).get(28)
+        self.assertEqual(migrated_alpha["id"], 28)
+        self.assertEqual(migrated_alpha["barcode"], "TOOL-001")
+        self.assertEqual(migrated_alpha["quantity"], 4.5)
+        self.assertEqual(migrated_alpha["stock_status"], "known")
+        self.assertEqual(migrated_alpha["tracking_mode"], "inventory")
+        self.assertEqual(migrated_alpha["location"], "Garage")
+        self.assertEqual(migrated_alpha["notes"], "Alphanumerischer Bestand")

@@ -120,7 +120,7 @@
           <input id="item-name" name="name" required maxlength="160" placeholder="z. B. Olivenöl" />
         </label>
         <label class="field full-field">Barcode <span class="optional">optional</span>
-          <input id="item-barcode" name="barcode" maxlength="64" inputmode="numeric" placeholder="Code eintippen oder scannen" />
+          <input id="item-barcode" name="barcode" maxlength="64" inputmode="text" autocapitalize="off" spellcheck="false" placeholder="Code eintippen oder scannen" />
         </label>
         <div class="form-grid">
           <label class="field">Marke <span class="optional">optional</span>
@@ -215,14 +215,15 @@
         <video id="camera-video" playsinline muted></video>
         <span class="scan-frame" aria-hidden="true"></span>
       </div>
-      <p class="camera-status" id="camera-status" hidden></p>
+      <p class="camera-status" id="camera-status" role="status" aria-live="polite" aria-atomic="true" hidden></p>
       <button class="button button-quiet camera-button" id="camera-button" type="button" hidden>Kamera öffnen</button>
       <label class="field full-field scan-field">Barcode eingeben oder Scanner verwenden
         <div class="scan-input-row">
-          <input id="scan-input" autocomplete="off" inputmode="numeric" placeholder="Barcode …" />
+          <input id="scan-input" autocomplete="off" inputmode="text" autocapitalize="off" spellcheck="false" placeholder="Barcode oder Artikelcode …" />
           <button class="button button-primary" id="lookup-button" type="button">Suchen</button>
         </div>
       </label>
+      <button class="button button-quiet full-field" id="manual-entry-button" type="button" hidden>Manuell erfassen</button>
       <p class="scan-hint">Ein Bluetooth- oder USB-Scanner funktioniert wie eine Tastatur. Bestätige danach mit Enter.</p>
     </dialog>
 

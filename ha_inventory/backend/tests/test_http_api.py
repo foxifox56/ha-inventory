@@ -10,7 +10,11 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from backend.app import create_handler
-from backend.product_lookup.provider import ProductCandidate, ProductLookupUnavailable
+from backend.product_lookup.provider import (
+    ProductCandidate,
+    ProductLookupRateLimited,
+    ProductLookupUnavailable,
+)
 from backend.product_lookup.service import ProductLookupService
 from backend.web.handler import ingress_request_allowed
 
@@ -219,6 +223,54 @@ class HttpApiTests(unittest.TestCase):
         self.assertEqual(current["quantity"], 6)
         self.assertEqual(current["stock_status"], "known")
 
+    def test_alphanumeric_item_code_is_found_and_unknown_code_skips_external_provider(self) -> None:
+        class ShouldNotBeCalled:
+            name = "numeric-provider"
+
+            def lookup(self, _barcode):
+                raise AssertionError("non-numeric codes must not be sent to Open Facts")
+
+        self.use_product_provider(ShouldNotBeCalled())
+        _, session, _ = self.request("/api/v1/write-session")
+        headers = {"X-HA-Inventory-Write-Token": session["write_token"]}
+        status, created, _ = self.request(
+            "/api/v1/items", "POST",
+            {"name": "Akkuschrauber", "barcode": "TOOL-001", "tracking_mode": "exact",
+             "quantity": 3, "stock_status": "known"},
+            headers,
+        )
+        self.assertEqual(status, 201)
+        item_id = created["item"]["id"]
+
+        status, found, _ = self.request("/api/v1/product-lookup/TOOL-001")
+        self.assertEqual(status, 200)
+        self.assertEqual(found["status"], "local")
+        self.assertEqual(found["item"]["id"], item_id)
+        self.assertEqual(found["item"]["barcode"], "TOOL-001")
+
+        status, unknown, _ = self.request("/api/v1/product-lookup/TOOL-002")
+        self.assertEqual(status, 200)
+        self.assertEqual(unknown, {"status": "not_found", "barcode": "TOOL-002"})
+        current = self.request(f"/api/v1/items/{item_id}")[1]["item"]
+        self.assertEqual(current["quantity"], 3)
+        self.assertEqual(current["stock_status"], "known")
+
+    def test_rate_limited_lookup_returns_bounded_retry_guidance(self) -> None:
+        class RateLimited:
+            name = "rate-limited"
+
+            def lookup(self, _barcode):
+                raise ProductLookupRateLimited("Warte kurz", retry_after_seconds=4.1)
+
+        self.use_product_provider(RateLimited())
+        status, body, headers = self.request("/api/v1/product-lookup/00088")
+        self.assertEqual(status, 429)
+        self.assertEqual(body["code"], "product_lookup_rate_limited")
+        self.assertEqual(body["status"], "rate_limited")
+        self.assertAlmostEqual(body["retry_after_seconds"], 4.1)
+        self.assertEqual(headers.get("Retry-After"), "5")
+        self.assertEqual(self.request("/api/v1/items")[0], 200)
+
     def test_external_product_lookup_returns_suggestions_without_saving(self) -> None:
         class Provider:
             name = "test-provider"
@@ -271,7 +323,7 @@ class HttpApiTests(unittest.TestCase):
         self.assertEqual(self.request("/api/v1/items")[0], 200)
 
     def test_lookup_rejects_invalid_barcode_and_remains_ingress_protected(self) -> None:
-        status, error, _ = self.request("/api/v1/product-lookup/not-a-barcode")
+        status, error, _ = self.request(f"/api/v1/product-lookup/{'x' * 65}")
         self.assertEqual(status, 400)
         self.assertEqual(error["field"], "barcode")
         handler = self.server.RequestHandlerClass

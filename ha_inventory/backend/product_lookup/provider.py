@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import threading
 import time
@@ -51,6 +52,15 @@ class ProductLookupUnavailable(ProductLookupError):
 
 class ProductLookupRateLimited(ProductLookupUnavailable):
     """A local request throttle or the provider rejected a request."""
+
+    def __init__(
+        self,
+        message: str,
+        retry_after_seconds: float = DEFAULT_MIN_REQUEST_INTERVAL_SECONDS,
+    ):
+        super().__init__(message)
+        delay = float(retry_after_seconds)
+        self.retry_after_seconds = max(0.05, delay) if math.isfinite(delay) else DEFAULT_MIN_REQUEST_INTERVAL_SECONDS
 
 
 @dataclass(frozen=True)
@@ -240,12 +250,15 @@ class OpenFactsProvider:
         now = self._clock()
         with self._request_lock:
             now = self._clock()
-            if (
-                self._last_request_at is not None
-                and now - self._last_request_at < self.min_request_interval
-            ):
+            remaining = (
+                self.min_request_interval - (now - self._last_request_at)
+                if self._last_request_at is not None
+                else 0
+            )
+            if remaining > 0:
                 raise ProductLookupRateLimited(
-                    "Produktsuche kurz hintereinander begrenzt. Bitte gleich erneut versuchen."
+                    "Open Facts begrenzt Anfragen kurz hintereinander.",
+                    retry_after_seconds=remaining,
                 )
             self._last_request_at = now
 
@@ -285,8 +298,22 @@ class OpenFactsProvider:
         except HTTPError as error:
             if error.code == 404:
                 return None
-            if error.code in {429, 503}:
-                raise ProductLookupRateLimited("Open Facts ist momentan ausgelastet.") from error
+            if error.code == 429:
+                retry_after = self.min_request_interval
+                header = error.headers.get("Retry-After") if error.headers else None
+                try:
+                    if header is not None:
+                        parsed_retry_after = float(header)
+                        if math.isfinite(parsed_retry_after):
+                            retry_after = max(0.05, parsed_retry_after)
+                except (TypeError, ValueError):
+                    pass
+                raise ProductLookupRateLimited(
+                    "Open Facts begrenzt Anfragen momentan.",
+                    retry_after_seconds=retry_after,
+                ) from error
+            if error.code == 503:
+                raise ProductLookupUnavailable("Open Facts ist momentan ausgelastet.") from error
             raise ProductLookupUnavailable(
                 f"Open Facts antwortet mit HTTP {error.code}."
             ) from error

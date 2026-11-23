@@ -7,12 +7,12 @@ Stand: 23.11.2026, Branch `development/v0.2`. Automatisierte Prüfungen verwende
 | Prüfung | Umfang |
 | --- | --- |
 | Backend-Unit-, Migrations- und HTTP-Tests | API v1, Ingress, lokale Treffer, Anbieter-Fallback, Metadatenvalidierung, Fehler, Schreibschutz und Datenbankpersistenz |
-| Provider-Tests | vier Open-Facts-Produktarten, benutzerdefinierter Folgeprovider, optionale Felder/Bilder, führende Nullen, ungültige JSON-/HTTP-Antworten, Timeouts, Rate-Limits, Cache und Redirect-Allowlist |
-| Frontend-Tests | automatische Formularvorschläge, fehlende Daten, unbekannter Barcode, Lade-/Abschlusszustand und Bestandsschutz |
+| Provider-Tests | vier Open-Facts-Produktarten, benutzerdefinierter Folgeprovider, optionale Felder/Bilder, führende Nullen, alphanumerische lokale Codes, ungültige JSON-/HTTP-Antworten, Timeouts, Retry-After, Cache und Redirect-Allowlist |
+| Frontend-Tests | numerische und alphanumerische Codes, Formularvorschläge, mehrere Rate-Limit-Retries, abbrechbare Wartezeit, manuelle Alternative und Bestandsschutz |
 | API-Client-Tests | abgelaufenes Token genau einmal erneuern; `403` von Ingress nicht als Tokenablauf behandeln; keine endlose Wiederholung |
 | Migrationstests | v1-Altbestand und v3-Bestand: IDs, Barcodes, Notizen und bestätigte Mengen bleiben bei der additiven v4-Migration erhalten |
 | Python/JavaScript-Syntax | `compileall` sowie `node --check` für App und Laufzeitmodule |
-| Lokale Ergebniszahlen | 38 Backendtests und 19 Frontendtests bestanden; YAML von App, Repository und Actions geparst |
+| Lokale Ergebniszahlen | 43 Backendtests und 25 Frontendtests bestanden; YAML von App, Repository und Actions geparst |
 | Docker lokal | Nicht ausführbar: Docker-CLI ist in dieser Umgebung nicht installiert |
 | Docker-Smoke-Tests | Containerstart, Ingress/API, Schreibsitzung und persistente `/data`-Daten auf AMD64 und ARM64 (GitHub Actions) |
 
@@ -38,22 +38,23 @@ bash scripts/container-smoke.sh
 INVENTORY_SMOKE_PLATFORM=linux/arm64 bash scripts/container-smoke.sh
 ```
 
-Der aktuelle Stand bestand im PR-Workflow [#14](https://github.com/foxifox56/ha-inventory/actions/runs/45193645487) und im Push-Workflow [#13](https://github.com/foxifox56/ha-inventory/actions/runs/45193632200). Beide liefen erfolgreich: Backend- und Frontendtests sowie Docker-Build und Smoke-Test für AMD64 und ARM64. Der lokale Docker-Smoke-Test war nicht verfügbar, da die Docker-CLI in dieser Entwicklungsumgebung nicht installiert ist.
+Die GitHub-Actions-Ergebnisse für die Review-Korrekturen werden nach dem Push ergänzt. Die vorherigen Läufe [#16](https://github.com/foxifox56/ha-inventory/actions/runs/45194137675) und [#15](https://github.com/foxifox56/ha-inventory/actions/runs/45194125312) decken diese Änderungen noch nicht ab.
 
 ## Manueller Ende-zu-Ende-Test auf einem iPhone
 
-Dieser Test wurde in dieser Entwicklungsumgebung nicht ausgeführt. Er benötigt ein iPhone, Home Assistant über lokale HTTPS-URL oder Nabu Casa und eine separat eingerichtete HA-Testinstanz. Vor einer Produktivinstallation ist der Kamera-Test zu erledigen.
+Dieser Test wurde in dieser Entwicklungsumgebung nicht ausgeführt. Er benötigt ein iPhone, eine separat eingerichtete Home-Assistant-Testinstanz und Zugriff über HTTPS. Er kann im Heim-WLAN über die HTTPS-URL von Home Assistant oder außerhalb des Hauses über die Nabu Casa Remote URL erfolgen. Beide Wege müssen HA-Login und den App-Ingress-Kontext verwenden; nicht direkt auf Add-on-IP oder -Port zugreifen.
 
-1. HA Inventory über **Home Assistant → Einstellungen → Apps → HA Inventory → Öffnen** starten. Nicht aus einer ungeschützten Direktadresse öffnen.
-2. Scanner antippen, bei Aufforderung Kamerazugriff erlauben und Rückkamera verifizieren. Browser muss HTTPS und Kamera im Ingress-Kontext unterstützen.
-3. Einen bereits gespeicherten Barcode scannen. Details müssen erscheinen; Menge und Status notieren und nach dem Scan vergleichen.
-4. Einen Open-Facts-Testbarcode scannen, der lokal nicht existiert. Ladeanzeige prüfen; falls gefunden, Name, Marke, Packungsgröße, Kategorie, Bild, Datenquelle und Bildlizenz prüfen. Felder ändern, Lagerort und Bestandsmodell selbst wählen. Vor dem Tippen auf „Artikel speichern“ darf die Artikelliste unverändert bleiben.
-5. Formular abbrechen und den Barcode erneut scannen. Prüfen, dass kein neuer Artikel angelegt wurde. Danach bewusst speichern und prüfen, dass genau ein Datensatz mit den gewählten Feldern angelegt wurde und der Bestand nur dem ausdrücklich ausgewählten Bestandsmodell entspricht.
-6. Einen unbekannten Barcode scannen oder eingeben. Das normale Formular muss mit Barcode geöffnet werden. Manuelle Eingabe und Kamerascan müssen denselben Ablauf verwenden.
-7. Bei laufender Kamera den Dialog schließen. Kameraindikator muss erlöschen. Kamerazugriff verweigern und einen Offline-/Timeoutfall simulieren: verständliche Meldung, manuelle Eingabe bleibt nutzbar.
-8. Einen bekannten Barcode erneut scannen und die Werte mit den zuvor notierten Bestandswerten vergleichen. Ein Scan darf nie Menge, Status oder Lagerort ändern.
+1. In der Home-Assistant-App auf dem iPhone anmelden. Im Heim-WLAN die lokale HTTPS-URL oder außerhalb des Hauses die Nabu Casa Remote URL öffnen. Danach HA Inventory über **Einstellungen → Apps → HA Inventory → Öffnen** aufrufen. Nicht über Add-on-IP, Port oder eine direkte App-URL starten.
+2. Scanner antippen und Kamerazugriff erteilen. Rückkamera prüfen. Safari beziehungsweise der Home-Assistant-In-App-Browser muss HTTPS, Anmeldung und Ingress-Sitzung beibehalten.
+3. Einen bereits gespeicherten numerischen Artikelcode und einen alphanumerischen Code wie `TOOL-001` scannen. Beide müssen denselben vorhandenen Datensatz öffnen. Menge, Status und Lagerort vorher/nachher vergleichen.
+4. Einen unbekannten alphanumerischen Code scannen und anschließend manuell eingeben. Beide Male muss die manuelle Artikelerfassung mit unverändertem Code öffnen, ohne Open Facts aufzurufen.
+5. Einen bekannten Open-Facts-Testbarcode scannen, der lokal nicht existiert. Ladeanzeige prüfen; falls erkannt, Name, Marke, Packungsgröße, Kategorie, Bild, Quelle und Bildlizenz prüfen. Felder editieren und Lagerort/Bestandsmodell wählen. Vor „Artikel speichern“ darf kein Datensatz in der Lagerübersicht erscheinen.
+6. Drei unterschiedliche, lokal unbekannte numerische Barcodes direkt nacheinander scannen. Bei Rate-Limit muss eine verständliche Warteanzeige mit automatischem begrenztem Retry erscheinen. Währenddessen „Manuell erfassen“ antippen: Warte-Retry muss abbrechen und das Formular sofort mit dem Barcode öffnen.
+7. Formular abbrechen, denselben Barcode erneut scannen und prüfen, dass kein Artikel angelegt wurde. Danach bewusst einmal speichern; genau ein Datensatz muss erscheinen. Doppeltippen auf Speichern darf keine zweite Anlage erzeugen.
+8. Offlinezugriff beziehungsweise einen Provider-Timeout testen. Fehlermeldung, „Erneut versuchen“ und manuelle Erfassung prüfen. Bei wiederholtem Scan eines gespeicherten Codes müssen immer dieselben Artikel-ID und Bestandswerte erscheinen.
+9. Bei laufender Kamera den Dialog schließen. Kameraindikator muss erlöschen. Ein Scan darf niemals Menge, Bestandsstatus oder Lagerort ändern.
 
-Für echte Produkterkennung ist eine Internetverbindung vom Home-Assistant-App-Container zu den Open-Facts-HTTPS-APIs erforderlich. Tests können mit kuratierten Beispielprodukten aus den jeweiligen Facts-Projekten erfolgen; Produktdaten sind freiwillig gepflegt und können sich ändern.
+Für externe Produkterkennung braucht der App-Container eine Internetverbindung zu den Open-Facts-HTTPS-APIs. Die Kataloge sind freiwillig gepflegt; Treffer, Kategorien und Bilder können fehlen, veraltet, falsch oder durch upstream Rate-Limits zeitweise nicht verfügbar sein. In diesen Fällen werden Lookupfehler nicht gespeichert und kein Bestand verändert; der Nutzer kann begrenzt erneut versuchen oder manuell fortfahren. Automatisierte Tests verwenden ausschließlich Provider-Mocks, keinen Live-Open-Facts-Zugriff.
 
 ## Noch offene Hardware-/Supervisor-Checks
 

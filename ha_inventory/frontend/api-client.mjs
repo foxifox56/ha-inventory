@@ -51,6 +51,7 @@ export function createApiClient(fetchImpl, apiBaseUrl) {
       error.status = response.status;
       error.code = body.code;
       error.field = body.field;
+      error.retryAfterSeconds = Number(body.retry_after_seconds);
       throw error;
     }
     return body;
