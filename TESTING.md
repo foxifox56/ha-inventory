@@ -13,8 +13,8 @@ Stand: 23.11.2026 · Branch `development/v0.3`. Automatisierte Tests verwenden t
 | Home-Assistant-App-Konfiguration | YAML erfolgreich gelesen; Version `0.3.0`, Architekturen `aarch64`/`amd64`, `backup: cold` |
 | Docker lokal | Nicht ausgeführt: Docker-CLI ist in der Entwicklungsumgebung nicht verfügbar |
 | Docker-Smoke-Test in GitHub Actions | Erfolgreich auf `linux/amd64` und `linux/arm64`; umfasst Buchung, idempotentes Replay, Undo und Verlauf nach Neustart |
-| GitHub Actions Push-Workflow | [Run #33](https://github.com/foxifox56/ha-inventory/actions/runs/45236052765) erfolgreich für Commit `7e46824`: Tests sowie AMD64- und ARM64-Container-Smoke bestanden |
-| GitHub Actions PR-Workflow | [Run #34](https://github.com/foxifox56/ha-inventory/actions/runs/45236063334) erfolgreich für Commit `7e46824`: Tests sowie AMD64- und ARM64-Container-Smoke bestanden |
+| GitHub Actions Push-Workflow | [Run #37](https://github.com/foxifox56/ha-inventory/actions/runs/45245063304) erfolgreich für Commit `295dd7e`: Backend-/Frontendtests sowie AMD64- und ARM64-Container-Smoke bestanden |
+| GitHub Actions PR-Workflow | [Run #38](https://github.com/foxifox56/ha-inventory/actions/runs/45245076227) erfolgreich für Commit `295dd7e`: Backend-/Frontendtests sowie AMD64- und ARM64-Container-Smoke bestanden |
 
 Befehle aus `ha_inventory/`:
 
@@ -25,7 +25,7 @@ python3 -m compileall -q backend
 for file in frontend/*.js frontend/*.mjs frontend/vendor/*.mjs; do node --check "$file" || exit 1; done
 ```
 
-Die aktuellen lokalen Testläufe umfassen 62 Backend- und 37 Frontendtests. GitHub-Actions-Runs #35 und #36 prüfen den vorherigen Stand `b59122f`; beide Workflows waren erfolgreich und deckten Container-Smokes auf `linux/amd64` sowie `linux/arm64` ab. Die CI-Prüfung für die aktuellen Änderungen wird nach dem Push ergänzt. Ein ARM64-Container-Test ist kein Supervisor- oder Raspberry-Pi-Hardwaretest; er belegt keinen echten Pi-/Supervisor-Test.
+Die lokalen Tests und GitHub-Actions-Runs #37 und #38 prüfen die Review-Korrekturen auf Commit `295dd7e`; beide Workflows waren erfolgreich und deckten Container-Smokes auf `linux/amd64` sowie `linux/arm64` ab. Ein ARM64-Container-Test ist kein Supervisor- oder Raspberry-Pi-Hardwaretest; er belegt keinen echten Pi-/Supervisor-Test.
 
 ## Manuelle Testanleitung: iPhone über Ingress und Nabu Casa
 
