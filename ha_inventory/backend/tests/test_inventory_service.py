@@ -25,11 +25,38 @@ class InventoryServiceTests(unittest.TestCase):
         self.assertEqual(item["barcode"], "0040123456789")
         self.assertEqual(self.service.get_by_barcode("0040123456789")["id"], item["id"])
 
-    def test_create_uses_defaults_and_manual_quantity(self) -> None:
-        item = self.service.create({"name": "Hammer", "quantity": 2})
+    def test_create_defaults_to_unknown_simple_stock_without_phantom_quantity(self) -> None:
+        item = self.service.create({"name": "Hammer"})
         self.assertEqual(item["category"], "Sonstiges")
-        self.assertEqual(item["quantity"], 2)
+        self.assertEqual(item["tracking_mode"], "simple")
+        self.assertEqual(item["stock_status"], "unknown")
+        self.assertIsNone(item["quantity"])
         self.assertEqual(item["minimum_quantity"], 0)
+
+    def test_inventory_mode_can_have_unknown_or_estimated_quantity(self) -> None:
+        unknown = self.service.create(
+            {"name": "Kabelbinder", "tracking_mode": "inventory"}
+        )
+        estimated = self.service.create(
+            {"name": "Schrauben", "tracking_mode": "inventory", "quantity": 2}
+        )
+        self.assertEqual((unknown["quantity"], unknown["stock_status"]), (None, "unknown"))
+        self.assertEqual((estimated["quantity"], estimated["stock_status"]), (2, "known"))
+
+    def test_exact_zero_is_known_and_distinct_from_unknown(self) -> None:
+        zero = self.service.create(
+            {"name": "Mehl", "tracking_mode": "exact", "quantity": 0}
+        )
+        unknown = self.service.create({"name": "Zucker", "tracking_mode": "exact"})
+        self.assertEqual((zero["quantity"], zero["stock_status"]), (0, "known"))
+        self.assertEqual((unknown["quantity"], unknown["stock_status"]), (None, "unknown"))
+
+    def test_simple_status_does_not_invent_a_numeric_count(self) -> None:
+        item = self.service.create({"name": "Reinigungsmittel", "stock_status": "present"})
+        self.assertEqual(item["stock_status"], "present")
+        self.assertIsNone(item["quantity"])
+        with self.assertRaises(InventoryError):
+            self.service.create({"name": "Farbe", "quantity": 1})
 
     def test_duplicate_barcode_returns_conflict(self) -> None:
         self.service.create({"name": "A", "barcode": "123"})
@@ -42,13 +69,22 @@ class InventoryServiceTests(unittest.TestCase):
         for quantity in (-1, "nan", "inf"):
             with self.subTest(quantity=quantity):
                 with self.assertRaises(InventoryError):
-                    self.service.create({"name": "Test", "quantity": quantity})
+                    self.service.create(
+                        {"name": "Test", "tracking_mode": "exact", "quantity": quantity}
+                    )
 
     def test_update_changes_only_explicitly_submitted_fields(self) -> None:
-        item = self.service.create({"name": "Mehl", "quantity": 3})
+        item = self.service.create({"name": "Mehl", "tracking_mode": "exact", "quantity": 3})
         changed = self.service.update(item["id"], {"location": "Speisekammer"})
         self.assertEqual(changed["quantity"], 3)
         self.assertEqual(changed["location"], "Speisekammer")
+
+    def test_switching_from_presence_to_counted_mode_keeps_stock_unknown(self) -> None:
+        item = self.service.create({"name": "Dosenmais", "stock_status": "present"})
+        changed = self.service.update(item["id"], {"tracking_mode": "exact"})
+        self.assertEqual(changed["tracking_mode"], "exact")
+        self.assertEqual(changed["stock_status"], "unknown")
+        self.assertIsNone(changed["quantity"])
 
     def test_search_and_category_filter(self) -> None:
         self.service.create({"name": "Schraubendreher", "category": "Werkzeuge"})

@@ -17,6 +17,10 @@ MAX_REQUEST_BYTES = 1_000_000
 INGRESS_PROXY_IP = "172.30.32.2"
 
 
+def ingress_request_allowed(client_ip: str, required: bool = True) -> bool:
+    return not required or client_ip == INGRESS_PROXY_IP
+
+
 class InventoryRequestHandler(BaseHTTPRequestHandler):
     inventory: InventoryService
     require_ingress_proxy = True
@@ -74,9 +78,7 @@ class InventoryRequestHandler(BaseHTTPRequestHandler):
         print(f"{self.address_string()} - {format % args}", flush=True)
 
     def _allow_request(self) -> bool:
-        if not self.require_ingress_proxy:
-            return True
-        if self.client_address[0] == INGRESS_PROXY_IP:
+        if ingress_request_allowed(self.client_address[0], self.require_ingress_proxy):
             return True
         self._json_response(403, {"error": "Zugriff nur über Home Assistant Ingress."})
         return False

@@ -27,7 +27,7 @@
           </div>
           <div class="hero-actions">
             <button class="button button-quiet" id="scan-button" type="button">
-              <span aria-hidden="true">▤</span> Barcode scannen
+              <span aria-hidden="true">▤</span> Barcode suchen
             </button>
             <button class="button button-primary" id="add-button" type="button">
               <span aria-hidden="true">＋</span> Artikel anlegen
@@ -102,15 +102,31 @@
           <label class="field">Lagerort
             <input id="item-location" name="location" maxlength="160" placeholder="z. B. Vorratskammer" />
           </label>
-          <label class="field">Bestand
-            <input id="item-quantity" name="quantity" type="number" min="0" step="any" value="1" required />
+          <label class="field full-field">Bestandsmodell
+            <select id="item-tracking-mode" name="tracking_mode">
+              <option value="simple">Einfacher Vorrat · vorhanden / nicht vorhanden</option>
+              <option value="inventory">Inventar · geschätzte Menge</option>
+              <option value="exact">Exakter Bestand · manuell gezählt</option>
+            </select>
           </label>
-          <label class="field">Einheit
-            <input id="item-unit" name="unit" maxlength="40" value="Stück" placeholder="Stück, kg, Packung …" />
+          <label class="field full-field" id="simple-stock-field">Status
+            <select id="item-stock-status" name="stock_status">
+              <option value="unknown">Bestand unbekannt</option>
+              <option value="present">Vorhanden</option>
+              <option value="out_of_stock">Nicht vorhanden</option>
+            </select>
           </label>
-          <label class="field">Mindestbestand <span class="optional">optional</span>
-            <input id="item-minimum" name="minimum_quantity" type="number" min="0" step="any" value="0" required />
-          </label>
+          <div id="numeric-stock-fields" class="form-grid full-field" hidden>
+            <label class="field">Menge <span class="optional">leer = unbekannt</span>
+              <input id="item-quantity" name="quantity" type="number" min="0" step="any" placeholder="Menge" />
+            </label>
+            <label class="field">Einheit
+              <input id="item-unit" name="unit" maxlength="40" value="Stück" placeholder="Stück, kg, Packung …" />
+            </label>
+            <label class="field">Mindestbestand <span class="optional">optional</span>
+              <input id="item-minimum" name="minimum_quantity" type="number" min="0" step="any" value="0" />
+            </label>
+          </div>
           <label class="field full-field">Notiz <span class="optional">optional</span>
             <textarea id="item-notes" name="notes" maxlength="1000" rows="2" placeholder="Zusätzliche Infos …"></textarea>
           </label>
@@ -123,18 +139,41 @@
       </form>
     </dialog>
 
+    <dialog id="detail-dialog" class="dialog detail-dialog">
+      <div class="dialog-heading">
+        <div><p class="eyebrow">ARTIKELDETAILS</p><h2 id="detail-name"></h2></div>
+        <button class="icon-button" id="close-detail-dialog" type="button" aria-label="Schließen">×</button>
+      </div>
+      <dl class="detail-grid">
+        <div><dt>Bestand</dt><dd id="detail-stock"></dd></div>
+        <div><dt>Bestandsmodell</dt><dd id="detail-mode"></dd></div>
+        <div><dt>Kategorie</dt><dd id="detail-category"></dd></div>
+        <div><dt>Lagerort</dt><dd id="detail-location"></dd></div>
+        <div><dt>Barcode</dt><dd id="detail-barcode"></dd></div>
+      </dl>
+      <div class="detail-note" id="detail-notes-wrap" hidden>
+        <span>Notiz</span><p id="detail-notes"></p>
+      </div>
+      <p class="detail-footnote">Der Scan hat den Bestand nicht verändert.</p>
+      <div class="dialog-actions">
+        <button class="button button-quiet" id="close-detail-button" type="button">Schließen</button>
+        <button class="button button-primary" id="detail-edit-button" type="button">Artikel bearbeiten</button>
+      </div>
+    </dialog>
+
     <dialog id="scan-dialog" class="dialog scan-dialog">
       <div class="dialog-heading">
         <div><p class="eyebrow">SCHNELLER ZUGRIFF</p><h2>Barcode scannen</h2></div>
         <button class="icon-button" id="close-scan-dialog" type="button" aria-label="Schließen">×</button>
       </div>
-      <p class="scan-copy">Scanne einen Artikel, um ihn zu finden oder neu anzulegen. Dabei wird der Bestand nicht verändert.</p>
+      <p class="scan-copy">Ein bekannter Code öffnet die Artikeldetails; ein neuer Code startet die Erfassung. Ein Scan verändert nie den Bestand.</p>
+      <p class="camera-limitation">Kamera-Scan in Version 0.1 experimentell: Er hängt von der Browser-API ab und ist auf iPhone/Safari nicht verlässlich verfügbar. Manuelle Eingabe funktioniert immer.</p>
       <div class="camera-wrap" id="camera-wrap" hidden>
         <video id="camera-video" playsinline muted></video>
         <span class="scan-frame" aria-hidden="true"></span>
       </div>
       <p class="camera-status" id="camera-status" hidden></p>
-      <button class="button button-quiet camera-button" id="camera-button" type="button" hidden>▣ Kamera öffnen</button>
+      <button class="button button-quiet camera-button" id="camera-button" type="button" hidden>▣ Kamera testen (Beta)</button>
       <label class="field full-field scan-field">Barcode eingeben oder Scanner verwenden
         <div class="scan-input-row">
           <input id="scan-input" autocomplete="off" inputmode="numeric" placeholder="Barcode …" />
@@ -145,6 +184,6 @@
     </dialog>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <script src="app.js" defer></script>
+    <script type="module" src="app.js"></script>
   </body>
 </html>

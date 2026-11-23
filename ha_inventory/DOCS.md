@@ -10,20 +10,24 @@ Diese Schritte verändern Home Assistant. Die App wurde in der Entwicklungsrunde
 
 ## Nutzung
 
-- Mit **Artikel anlegen** können Artikelname, Barcode, Kategorie, Bestand, Einheit, Lagerort und Mindestmenge eingetragen werden.
-- Mit **Barcode scannen** wird ein bekannter Artikel gesucht. Unbekannte Codes werden in das Formular für einen neuen Artikel übernommen.
+- Mit **Artikel anlegen** können Artikelname, Barcode, Kategorie, Lagerort und das passende Bestandsmodell gewählt werden.
+- Die Bestandsmodelle sind **Einfacher Vorrat** (unbekannt/vorhanden/nicht vorhanden), **Inventar** (manuell geschätzte Menge) und **Exakter Bestand** (manuell gezählte Menge).
+- Eine leere Menge bedeutet ausdrücklich **Bestand unbekannt**. Eine eingetragene 0 ist ein bekannter Nullbestand.
+- Ein bekannter Barcode öffnet eine Detailansicht mit Name, Kategorie, Lagerort und Bestandsstatus. Unbekannte Codes werden in das Formular für einen neuen Artikel übernommen.
 - Ein Scan verändert niemals den Bestand. Bestand und Mindestmenge werden nur durch Speichern im Artikelformular verändert.
 - Ein Barcode darf nur einem Artikel zugeordnet werden. Codes werden als Zeichenfolgen gespeichert und behalten führende Nullen.
-- Der Kamera-Scanner funktioniert in Browsern mit `BarcodeDetector` und verfügbarem HTTPS-Kamerazugriff. Manuelle Eingabe sowie Bluetooth-/USB-Scanner bleiben verfügbar, falls die Kamera nicht unterstützt wird.
+- Der Kamera-Scan in 0.1 ist experimentell: Er nutzt die Browser-API `BarcodeDetector`, ist auf iPhone/Safari nicht verlässlich und wurde dort nicht getestet. Manuelle Eingabe sowie Bluetooth-/USB-Scanner funktionieren als Fallback.
 
 ## Speicherung und Sicherung
 
-Die SQLite-Datenbank liegt in `/data/inventory.sqlite3`. Das Verzeichnis ist als Home-Assistant-App-Datenbereich eingebunden und Bestandteil der Supervisor-App-Sicherungen. Zum Export oder zur Wiederherstellung kann ein vollständiges Home-Assistant-Backup verwendet werden.
+Die SQLite-Datenbank liegt in `/data/inventory.sqlite3`. Home Assistant stellt `/data` standardmäßig als privaten, dauerhaften App-Speicher bereit und nimmt es in App-Backups auf. Zum Export oder zur Wiederherstellung kann ein vollständiges Home-Assistant-Backup verwendet werden.
+
+Beim Schema-Upgrade von der ersten 0.1-Version bleiben Artikeldaten wie Barcode, Kategorie, Lagerort und Notiz erhalten. Alte Mengen werden auf „unbekannt“ zurückgesetzt, weil Version 1 automatisch `1` eingetragen hat und sich diese Standardwerte nicht sicher von bewusst eingegebenen Mengen unterscheiden lassen. Verifizierte Mengen können danach manuell neu eingetragen werden.
 
 ## Fehlerbehebung
 
 - **Leere Liste:** Beim ersten Start ist das Lager leer. Lege einen Artikel an oder scanne einen Code.
-- **Kamera nicht verfügbar:** Öffne Home Assistant über HTTPS, erlaube den Kamerazugriff oder verwende die manuelle Codeeingabe.
+- **Kamera nicht verfügbar:** Der Kamera-Scan ist in 0.1 nur experimentell. Verwende die manuelle Codeeingabe oder einen Bluetooth-/USB-Scanner.
 - **App startet nicht:** Prüfe die App-Protokolle im Home-Assistant-App-Menü. Der erste Container-Build kann auf dem Pi länger dauern.
 - **Daten behalten:** Die App nicht deinstallieren, wenn die Daten erhalten bleiben sollen. Vor Änderungen ein Home-Assistant-Backup erstellen.
 

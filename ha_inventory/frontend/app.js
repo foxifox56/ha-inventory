@@ -1,6 +1,10 @@
+import { isLowStock, stockDetail, stockLabel, trackingModeLabel } from './stock.mjs';
+import { lookupBarcodeValue } from './barcode-lookup.mjs';
+
 const API = new URL('api/', document.baseURI).toString();
 const $ = (selector) => document.querySelector(selector);
 const itemDialog = $('#item-dialog');
+const detailDialog = $('#detail-dialog');
 const scanDialog = $('#scan-dialog');
 const form = $('#item-form');
 let items = [];
@@ -9,6 +13,7 @@ let toastTimeout;
 let cameraStream;
 let scanFrame;
 let scannerBusy = false;
+let activeDetailItem;
 
 async function api(path, options = {}) {
   const response = await fetch(new URL(path, API), {
@@ -39,10 +44,6 @@ function showToast(message) {
   toastTimeout = setTimeout(() => toast.classList.remove('visible'), 3000);
 }
 
-function formatQuantity(value) {
-  return new Intl.NumberFormat('de-DE', { maximumFractionDigits: 2 }).format(value);
-}
-
 function iconFor(category) {
   const icons = { Lebensmittel: '◉', Werkzeuge: '⌁', Haushalt: '⌂', Sonstiges: '▦' };
   return icons[category] || '▦';
@@ -50,7 +51,7 @@ function iconFor(category) {
 
 function render() {
   $('#stat-items').textContent = items.length;
-  $('#stat-low').textContent = items.filter((item) => item.minimum_quantity > 0 && item.quantity <= item.minimum_quantity).length;
+  $('#stat-low').textContent = items.filter(isLowStock).length;
   $('#stat-locations').textContent = new Set(items.map((item) => item.location.trim()).filter(Boolean)).size;
   renderFilters();
 }
@@ -83,7 +84,8 @@ function renderFilters() {
 }
 
 function renderItem(item) {
-  const isLow = item.minimum_quantity > 0 && item.quantity <= item.minimum_quantity;
+  const isLow = isLowStock(item);
+  const isEmpty = item.tracking_mode === 'simple' && item.stock_status === 'out_of_stock';
   return `<article class="item-row">
     <div class="item-main">
       <span class="item-symbol" aria-hidden="true">${iconFor(item.category)}</span>
@@ -93,9 +95,10 @@ function renderItem(item) {
       </div>
     </div>
     <span class="item-category">${escapeHtml(item.category)}</span>
-    <span class="item-quantity ${isLow ? 'low-stock' : ''}">${formatQuantity(item.quantity)} ${escapeHtml(item.unit)}${isLow ? ' · knapp' : ''}</span>
+    <span class="item-quantity ${isLow || isEmpty ? 'low-stock' : ''}">${escapeHtml(stockLabel(item))}${isLow ? ' · knapp' : ''}</span>
     <span class="item-location">${item.location ? `<span class="location-value">⌖ ${escapeHtml(item.location)}</span>` : '<span class="location-value">–</span>'}</span>
     <div class="row-actions">
+      <button class="icon-button view-item" type="button" data-id="${item.id}" aria-label="${escapeHtml(item.name)} ansehen">◉</button>
       <button class="icon-button edit-item" type="button" data-id="${item.id}" aria-label="${escapeHtml(item.name)} bearbeiten">✎</button>
       <button class="icon-button delete-item" type="button" data-id="${item.id}" aria-label="${escapeHtml(item.name)} löschen">×</button>
     </div>
@@ -115,9 +118,12 @@ async function loadItems() {
 function resetForm() {
   form.reset();
   $('#item-id').value = '';
-  $('#item-quantity').value = '1';
+  $('#item-tracking-mode').value = 'simple';
+  $('#item-stock-status').value = 'unknown';
+  $('#item-quantity').value = '';
   $('#item-unit').value = 'Stück';
   $('#item-minimum').value = '0';
+  syncTrackingFields();
   $('#form-title').textContent = 'Neuer Artikel';
   $('#form-error').hidden = true;
   $('#form-error').textContent = '';
@@ -137,13 +143,38 @@ function openEditItem(item) {
   $('#item-barcode').value = item.barcode || '';
   $('#item-category').value = item.category;
   $('#item-location').value = item.location;
-  $('#item-quantity').value = item.quantity;
+  $('#item-tracking-mode').value = item.tracking_mode;
+  $('#item-stock-status').value = item.stock_status;
+  $('#item-quantity').value = item.quantity ?? '';
   $('#item-unit').value = item.unit;
   $('#item-minimum').value = item.minimum_quantity;
   $('#item-notes').value = item.notes;
+  syncTrackingFields();
   $('#form-title').textContent = 'Artikel bearbeiten';
   itemDialog.showModal();
   $('#item-name').focus();
+}
+
+function syncTrackingFields() {
+  const simple = $('#item-tracking-mode').value === 'simple';
+  $('#simple-stock-field').hidden = !simple;
+  $('#numeric-stock-fields').hidden = simple;
+  if (simple) {
+    $('#item-quantity').value = '';
+  }
+}
+
+function openDetailItem(item) {
+  activeDetailItem = item;
+  $('#detail-name').textContent = item.name;
+  $('#detail-stock').textContent = stockDetail(item);
+  $('#detail-mode').textContent = trackingModeLabel(item.tracking_mode);
+  $('#detail-category').textContent = item.category || 'Sonstiges';
+  $('#detail-location').textContent = item.location || 'Kein Lagerort hinterlegt';
+  $('#detail-barcode').textContent = item.barcode || 'Kein Barcode hinterlegt';
+  $('#detail-notes').textContent = item.notes || '';
+  $('#detail-notes-wrap').hidden = !item.notes;
+  detailDialog.showModal();
 }
 
 function closeScanDialog() {
@@ -152,29 +183,22 @@ function closeScanDialog() {
 }
 
 async function lookupBarcode(rawBarcode) {
-  const barcode = rawBarcode.trim();
-  if (!barcode) {
-    $('#scan-input').focus();
-    return;
-  }
-  try {
+  const result = await lookupBarcodeValue(rawBarcode, async (barcode) => {
     const { item } = await api(`items/barcode/${encodeURIComponent(barcode)}`);
-    closeScanDialog();
-    const position = items.findIndex((entry) => entry.id === item.id);
-    if (position >= 0) {
-      activeCategory = '';
-      $('#search-input').value = '';
-      render();
-      document.querySelector(`[data-id="${item.id}"].edit-item`)?.closest('.item-row')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-    showToast(`Schon erfasst: ${item.name} · Bestand bleibt unverändert.`);
-  } catch (error) {
-    if (error.status === 404) {
+    return item;
+  }, {
+    found: (item) => {
+      closeScanDialog();
+      openDetailItem(item);
+    },
+    missing: (barcode) => {
       closeScanDialog();
       openNewItem(barcode);
-      return;
-    }
-    showToast(error.message);
+    },
+    failed: (error) => showToast(error.message),
+  });
+  if (result.outcome === 'empty') {
+    $('#scan-input').focus();
   }
 }
 
@@ -245,6 +269,13 @@ $('#scan-button').addEventListener('click', () => {
 });
 $('#close-item-dialog').addEventListener('click', () => itemDialog.close());
 $('#cancel-item').addEventListener('click', () => itemDialog.close());
+$('#close-detail-dialog').addEventListener('click', () => detailDialog.close());
+$('#close-detail-button').addEventListener('click', () => detailDialog.close());
+$('#detail-edit-button').addEventListener('click', () => {
+  if (!activeDetailItem) return;
+  detailDialog.close();
+  openEditItem(activeDetailItem);
+});
 $('#close-scan-dialog').addEventListener('click', closeScanDialog);
 $('#camera-button').addEventListener('click', startCamera);
 $('#lookup-button').addEventListener('click', () => lookupBarcode($('#scan-input').value));
@@ -255,6 +286,7 @@ $('#scan-input').addEventListener('keydown', (event) => {
   }
 });
 $('#search-input').addEventListener('input', renderFilters);
+$('#item-tracking-mode').addEventListener('change', syncTrackingFields);
 $('#category-filters').addEventListener('click', (event) => {
   const button = event.target.closest('[data-category]');
   if (!button) return;
@@ -263,7 +295,12 @@ $('#category-filters').addEventListener('click', (event) => {
 });
 $('#item-list').addEventListener('click', async (event) => {
   const editButton = event.target.closest('.edit-item');
+  const viewButton = event.target.closest('.view-item');
   const deleteButton = event.target.closest('.delete-item');
+  if (viewButton) {
+    const item = items.find((entry) => entry.id === Number(viewButton.dataset.id));
+    if (item) openDetailItem(item);
+  }
   if (editButton) {
     const item = items.find((entry) => entry.id === Number(editButton.dataset.id));
     if (item) openEditItem(item);
@@ -289,7 +326,13 @@ form.addEventListener('submit', async (event) => {
     barcode: $('#item-barcode').value,
     category: $('#item-category').value || 'Sonstiges',
     location: $('#item-location').value,
-    quantity: Number($('#item-quantity').value),
+    tracking_mode: $('#item-tracking-mode').value,
+    stock_status: $('#item-tracking-mode').value === 'simple'
+      ? $('#item-stock-status').value
+      : ($('#item-quantity').value.trim() ? 'known' : 'unknown'),
+    quantity: $('#item-tracking-mode').value === 'simple'
+      ? null
+      : ($('#item-quantity').value.trim() ? Number($('#item-quantity').value) : null),
     unit: $('#item-unit').value || 'Stück',
     minimum_quantity: Number($('#item-minimum').value),
     notes: $('#item-notes').value,

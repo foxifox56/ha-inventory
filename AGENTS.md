@@ -13,6 +13,7 @@
 - A barcode identifies an inventory item. Scanning it may open an existing item or start a new item form.
 - Scanning must never decrement, increment, or otherwise change stock automatically.
 - Stock changes happen only after a user explicitly saves an item edit.
+- Represent presence-only, estimated inventory, and exact manual counts as distinct tracking modes. A missing count must remain explicitly unknown, never be represented as zero or one.
 - Keep product lookup and other remote integrations optional. The app must remain usable on the local network without a cloud account.
 
 ## Development guidelines
@@ -23,7 +24,7 @@
 - Add a database migration when changing the schema; do not edit existing migrations.
 - Use the Python standard library unless an additional dependency has a clear user-facing benefit.
 - Keep the UI usable on phone-sized screens and provide manual barcode entry when camera scanning is unavailable.
-- Add or update `unittest` coverage for behavior changes. From `ha_inventory/`, run `python3 -m unittest discover -s backend/tests -v` before submitting.
+- Add or update backend `unittest` and frontend Node test coverage for behavior changes. From `ha_inventory/`, run `python3 -m unittest discover -s backend/tests -v` and `node --test frontend/tests/*.test.mjs` before submitting.
 - Update the README and `TESTING.md` when setup, behavior, or verification changes.
 - Never install or configure this app on the user's production Home Assistant during development. Use local tests or an isolated test environment.
 - Work on a development branch and leave integration into `main` for review.

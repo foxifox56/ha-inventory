@@ -6,7 +6,7 @@ import sqlite3
 from pathlib import Path
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 3
 
 
 class Database:
@@ -63,6 +63,78 @@ class Database:
                         "VALUES (1, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))"
                     )
                 current = 1
+
+            if current < 2:
+                with connection:
+                    connection.execute(
+                        """CREATE TABLE inventory_items_v2 (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            name TEXT NOT NULL,
+                            barcode TEXT UNIQUE,
+                            category TEXT NOT NULL DEFAULT 'Sonstiges',
+                            quantity REAL DEFAULT NULL
+                                CHECK(quantity IS NULL OR quantity >= 0),
+                            unit TEXT NOT NULL DEFAULT 'Stück',
+                            location TEXT NOT NULL DEFAULT '',
+                            minimum_quantity REAL NOT NULL DEFAULT 0
+                                CHECK(minimum_quantity >= 0),
+                            notes TEXT NOT NULL DEFAULT '',
+                            created_at TEXT NOT NULL,
+                            updated_at TEXT NOT NULL
+                        )"""
+                    )
+                    connection.execute(
+                        """INSERT INTO inventory_items_v2 (
+                            id, name, barcode, category, quantity, unit, location,
+                            minimum_quantity, notes, created_at, updated_at
+                        ) SELECT id, name, barcode, category, quantity, unit, location,
+                            minimum_quantity, notes, created_at, updated_at
+                        FROM inventory_items"""
+                    )
+                    connection.execute("DROP TABLE inventory_items")
+                    connection.execute(
+                        "ALTER TABLE inventory_items_v2 RENAME TO inventory_items"
+                    )
+                    connection.execute(
+                        "CREATE INDEX inventory_items_name_idx "
+                        "ON inventory_items(name COLLATE NOCASE)"
+                    )
+                    connection.execute(
+                        "CREATE INDEX inventory_items_category_idx "
+                        "ON inventory_items(category COLLATE NOCASE)"
+                    )
+                    connection.execute(
+                        "INSERT INTO schema_migrations(version, applied_at) "
+                        "VALUES (2, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))"
+                    )
+                current = 2
+
+            if current < 3:
+                with connection:
+                    connection.execute(
+                        """ALTER TABLE inventory_items ADD COLUMN tracking_mode TEXT
+                            NOT NULL DEFAULT 'simple'
+                            CHECK(tracking_mode IN ('simple', 'inventory', 'exact'))"""
+                    )
+                    connection.execute(
+                        """ALTER TABLE inventory_items ADD COLUMN stock_status TEXT
+                            NOT NULL DEFAULT 'unknown'
+                            CHECK(stock_status IN ('unknown', 'present', 'out_of_stock', 'known'))"""
+                    )
+                    # Version 1 used a default count of 1, so stored numbers cannot
+                    # be distinguished from phantom defaults. Keep item metadata but
+                    # require every legacy count to be confirmed explicitly.
+                    connection.execute(
+                        """UPDATE inventory_items
+                           SET tracking_mode = 'simple', stock_status = 'unknown',
+                               quantity = NULL"""
+                    )
+                    connection.execute(
+                        "INSERT INTO schema_migrations(version, applied_at) "
+                        "VALUES (3, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))"
+                    )
+                current = 3
+
             if current != SCHEMA_VERSION:
                 raise RuntimeError(
                     f"Unsupported database schema version {current}; "
