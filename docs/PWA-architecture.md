@@ -18,13 +18,14 @@ HA Inventory öffnet keinen Host-Port und fügt keine zweite Cloud-Datenbank ein
 
 Version 0.2 vendort `@zxing/browser` 0.2.1 lokal in der App, anstatt ein CDN zur Laufzeit aufzurufen. Beim Antippen des Scanners fordert der Browser Zugriff auf die nach hinten gerichtete Kamera an. Die Browser-API benötigt einen sicheren Kontext (normalerweise HTTPS) und eine erteilte Kameraberechtigung. ZXing dokumentiert, dass iOS vor 14.3 Kamera-WebRTC nur in Safari bereitstellt; neuere iOS-Versionen unterstützen WebRTC auch in Drittanbieter-Browsern. Das ist keine Garantie, dass jeder Ingress-/Nabu-Casa-/iOS-Kontext funktioniert. Die manuelle Eingabe sowie Tastatur-Scanner bleiben verfügbar.
 
-Ein bekannter Barcode öffnet die Details, ein unbekannter Barcode füllt das Formular für einen neuen Artikel vor. Scans führen keine Bestandsänderung aus.
+Ein bekannter Barcode öffnet die Details. Bei unbekannten Codes versucht das Backend über ausgehendes HTTPS die Produktdatenquelle Open Facts und füllt danach das editierbare Artikelformular vor. Wenn die Quelle offline ist oder keinen Treffer hat, bleibt das normale Formular mit Barcode verfügbar. Scans führen weder eine Artikelerstellung noch eine Bestandsänderung aus.
 
 ## In 0.2 umgesetzt
 
 - Mobile-first Web-Oberfläche mit Start-, Suche-, Scanner- und Lagerorte-Navigation, Kartenansicht, Touch-Zielen, Desktop-Layout und System-Dark-Mode.
 - ZXing-Kamera-Decoder im Scanner-Dialog, sofern Browser, HTTPS-Kontext und Berechtigungen ihn erlauben; manuelle Eingabe ist immer verfügbar.
 - App bleibt hinter Home Assistant Ingress. Der Barcode-Scanner nutzt keine externe Laufzeit-CDN.
+- Backend-Produktsuche über den lokalen, ingress-geschützten API-Endpunkt; an Open Facts wird nur der Barcode gesendet. Bilder werden über den vertrauenswürdigen Facts-Bildhost geladen und nicht offline gecacht.
 
 ## Noch offen
 

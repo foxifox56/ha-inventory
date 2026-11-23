@@ -3,8 +3,12 @@ import { lookupBarcodeValue } from './barcode-lookup.mjs';
 import { groupByLocation, filterItems, MOBILE_VIEWS } from './mobile-navigation.mjs';
 import { startZXingScanner } from './zxing-scanner.mjs';
 import { BrowserMultiFormatReader } from './vendor/zxing-browser.mjs';
+import { createApiClient } from './api-client.mjs';
+import { productPrefillValues } from './product-prefill.mjs';
 
 const API = new URL('api/v1/', document.baseURI).toString();
+const apiClient = createApiClient((...args) => window.fetch(...args), API);
+const api = (...args) => apiClient.request(...args);
 const $ = (selector) => document.querySelector(selector);
 const itemDialog = $('#item-dialog');
 const detailDialog = $('#detail-dialog');
@@ -19,39 +23,8 @@ let toastTimeout;
 let scannerControls;
 let scannerBusy = false;
 let activeDetailItem;
-let writeToken = '';
-
-async function acquireWriteSession() {
-  const response = await fetch(new URL('write-session', API), { cache: 'no-store' });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok || !body.write_token) throw new Error(body.error || 'Schreibsitzung konnte nicht geöffnet werden.');
-  writeToken = body.write_token;
-}
-
-async function api(path, options = {}, refreshedWriteSession = false) {
-  const method = (options.method || 'GET').toUpperCase();
-  if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && !writeToken) await acquireWriteSession();
-  const response = await fetch(new URL(path, API), {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(method !== 'GET' && writeToken ? { 'X-HA-Inventory-Write-Token': writeToken } : {}),
-      ...(options.headers || {}),
-    },
-  });
-  if (response.status === 403 && !refreshedWriteSession && !['GET', 'HEAD', 'OPTIONS'].includes(method)) {
-    await acquireWriteSession();
-    return api(path, options, true);
-  }
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const error = new Error(body.error || 'Die Anfrage ist fehlgeschlagen.');
-    error.status = response.status;
-    error.field = body.field;
-    throw error;
-  }
-  return body;
-}
+let barcodeLookupInProgress = false;
+let itemSaveInProgress = false;
 
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, (character) => ({
@@ -128,6 +101,7 @@ function renderItem(item) {
       <span class="item-symbol" aria-hidden="true">${iconFor(item.category)}</span>
       <div class="item-copy">
         <div class="item-name">${escapeHtml(item.name)}</div>
+        ${item.brand ? `<div class="item-brand">${escapeHtml(item.brand)}</div>` : ''}
         <div class="item-barcode">${item.barcode ? `▤ ${escapeHtml(item.barcode)}` : 'Kein Barcode'}</div>
       </div>
     </div>
@@ -155,6 +129,10 @@ async function loadItems() {
 function resetForm() {
   form.reset();
   $('#item-id').value = '';
+  $('#item-data-source').value = '';
+  $('#item-source-url').value = '';
+  $('#item-image-license').value = '';
+  renderProductAttribution('', '', '', '');
   $('#item-tracking-mode').value = 'simple';
   $('#item-stock-status').value = 'unknown';
   $('#item-quantity').value = '';
@@ -166,9 +144,23 @@ function resetForm() {
   $('#form-error').textContent = '';
 }
 
-function openNewItem(barcode = '') {
+function openNewItem(barcode = '', product = null) {
   resetForm();
-  $('#item-barcode').value = barcode;
+  if (product) {
+    const values = productPrefillValues(barcode, product);
+    $('#item-barcode').value = values.barcode;
+    $('#item-name').value = values.name;
+    $('#item-brand').value = values.brand;
+    $('#item-product-size').value = values.product_size;
+    $('#item-category').value = values.category;
+    $('#item-image-url').value = values.image_url;
+    $('#item-data-source').value = values.data_source;
+    $('#item-source-url').value = values.source_url;
+    $('#item-image-license').value = values.image_license;
+    renderProductAttribution(
+      values.data_source, values.source_url, values.image_url, values.image_license,
+    );
+  } else $('#item-barcode').value = barcode;
   itemDialog.showModal();
   $('#item-name').focus();
 }
@@ -186,11 +178,85 @@ function openEditItem(item) {
   $('#item-unit').value = item.unit;
   $('#item-minimum').value = item.minimum_quantity;
   $('#item-notes').value = item.notes;
+  $('#item-brand').value = item.brand || '';
+  $('#item-product-size').value = item.product_size || '';
+  $('#item-image-url').value = item.image_url || '';
+  $('#item-data-source').value = item.data_source || '';
+  $('#item-source-url').value = item.source_url || '';
+  $('#item-image-license').value = item.image_license || '';
+  renderProductAttribution(
+    item.data_source || '', item.source_url || '', item.image_url || '', item.image_license || '',
+  );
   syncTrackingFields();
   $('#form-title').textContent = 'Artikel bearbeiten';
   itemDialog.showModal();
   $('#item-name').focus();
 }
+
+function isOpenFactsImage(value) {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'https:' && [
+      'openfoodfacts.org', 'openbeautyfacts.org',
+      'openpetfoodfacts.org', 'openproductsfacts.org',
+    ].some((domain) => parsed.hostname === domain || parsed.hostname.endsWith(`.${domain}`));
+  } catch {
+    return false;
+  }
+}
+
+function renderProductAttribution(source, sourceUrl, imageUrl, imageLicense = '') {
+  const formContainer = $('#product-attribution');
+  const preview = $('#product-preview');
+  if (!formContainer || !preview) return;
+  if (isOpenFactsImage(imageUrl)) {
+    preview.src = imageUrl;
+    preview.hidden = false;
+  } else {
+    preview.removeAttribute('src');
+    preview.hidden = true;
+  }
+  const sourceLink = $('#product-source-link');
+  if (source && sourceUrl) {
+    sourceLink.textContent = `${source}${!preview.hidden && imageLicense ? ` · Bild: ${imageLicense}` : ''}`;
+    sourceLink.href = sourceUrl;
+    formContainer.hidden = false;
+  } else {
+    sourceLink.textContent = '';
+    sourceLink.removeAttribute('href');
+    formContainer.hidden = preview.hidden;
+  }
+
+  const detailContainer = $('#detail-product-media');
+  const detailImage = $('#detail-product-image');
+  if (!detailContainer || !detailImage) return;
+  if (isOpenFactsImage(imageUrl)) {
+    detailImage.src = imageUrl;
+    detailImage.hidden = false;
+  } else {
+    detailImage.removeAttribute('src');
+    detailImage.hidden = true;
+  }
+  const detailSource = $('#detail-product-source');
+  if (source && sourceUrl) {
+    detailSource.textContent = `${source}${!detailImage.hidden && imageLicense ? ` · Bild: ${imageLicense}` : ''}`;
+    detailSource.href = sourceUrl;
+    detailContainer.hidden = false;
+  } else {
+    detailSource.textContent = '';
+    detailSource.removeAttribute('href');
+    detailContainer.hidden = detailImage.hidden;
+  }
+}
+
+$('#item-image-url').addEventListener('input', () => {
+  renderProductAttribution(
+    $('#item-data-source').value,
+    $('#item-source-url').value,
+    $('#item-image-url').value.trim(),
+    $('#item-image-license').value,
+  );
+});
 
 function syncTrackingFields() {
   const simple = $('#item-tracking-mode').value === 'simple';
@@ -210,8 +276,13 @@ function openDetailItem(item) {
   $('#detail-category').textContent = item.category || 'Sonstiges';
   $('#detail-location').textContent = item.location || 'Kein Lagerort hinterlegt';
   $('#detail-barcode').textContent = item.barcode || 'Kein Barcode hinterlegt';
+  $('#detail-brand').textContent = item.brand || 'Keine Marke hinterlegt';
+  $('#detail-product-size').textContent = item.product_size || 'Keine Packungsgröße hinterlegt';
   $('#detail-notes').textContent = item.notes || '';
   $('#detail-notes-wrap').hidden = !item.notes;
+  renderProductAttribution(
+    item.data_source || '', item.source_url || '', item.image_url || '', item.image_license || '',
+  );
   detailDialog.showModal();
 }
 
@@ -222,21 +293,42 @@ function closeScanDialog() {
 }
 
 async function lookupBarcode(rawBarcode) {
+  if (barcodeLookupInProgress) return;
+  barcodeLookupInProgress = true;
   const result = await lookupBarcodeValue(rawBarcode, async (barcode) => {
-    const { item } = await api(`items/by-barcode/${encodeURIComponent(barcode)}`);
-    return item;
+    return api(`product-lookup/${encodeURIComponent(barcode)}`);
   }, {
+    pending: () => {
+      $('#lookup-button').disabled = true;
+      $('#lookup-button').textContent = 'Suche …';
+      $('#camera-status').textContent = 'Artikel und Produktdaten werden gesucht …';
+      $('#camera-status').hidden = false;
+    },
     found: (item) => {
       closeScanDialog();
       openDetailItem(item);
+    },
+    identified: (barcode, product) => {
+      closeScanDialog();
+      openNewItem(barcode, product);
     },
     missing: (barcode) => {
       closeScanDialog();
       openNewItem(barcode);
     },
-    failed: (error) => showToast(error.message),
+    failed: (error, barcode) => {
+      closeScanDialog();
+      showToast(`Produktsuche nicht verfügbar: ${error.message} Du kannst den Artikel selbst erfassen.`);
+      openNewItem(barcode);
+    },
+    settled: () => {
+      barcodeLookupInProgress = false;
+      $('#lookup-button').disabled = false;
+      $('#lookup-button').textContent = 'Suchen';
+    },
   });
   if (result.outcome === 'empty') {
+    barcodeLookupInProgress = false;
     $('#scan-input').focus();
   }
 }
@@ -393,10 +485,20 @@ $('#item-list').addEventListener('click', async (event) => {
 
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
+  if (itemSaveInProgress) return;
+  itemSaveInProgress = true;
+  const submitButton = form.querySelector('[type="submit"]');
+  submitButton.disabled = true;
   const id = $('#item-id').value;
   const payload = {
     name: $('#item-name').value,
     barcode: $('#item-barcode').value,
+    brand: $('#item-brand').value,
+    product_size: $('#item-product-size').value,
+    image_url: $('#item-image-url').value,
+    image_license: $('#item-image-license').value,
+    data_source: $('#item-data-source').value,
+    source_url: $('#item-source-url').value,
     category: $('#item-category').value || 'Sonstiges',
     location: $('#item-location').value,
     tracking_mode: $('#item-tracking-mode').value,
@@ -422,6 +524,9 @@ form.addEventListener('submit', async (event) => {
     $('#form-error').textContent = error.message;
     $('#form-error').hidden = false;
     if (error.field) document.querySelector(`[name="${error.field}"]`)?.focus();
+  } finally {
+    itemSaveInProgress = false;
+    submitButton.disabled = false;
   }
 });
 
@@ -439,5 +544,4 @@ if (window.isSecureContext && navigator.mediaDevices?.getUserMedia) {
   $('#camera-button').hidden = false;
 }
 
-acquireWriteSession().catch((error) => showToast(`Schreibzugriff: ${error.message}`));
 loadItems();

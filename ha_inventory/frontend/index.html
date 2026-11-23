@@ -109,6 +109,13 @@
           <button class="icon-button" id="close-item-dialog" type="button" aria-label="Schließen">×</button>
         </div>
         <input id="item-id" type="hidden" />
+        <input id="item-data-source" type="hidden" />
+        <input id="item-source-url" type="hidden" />
+        <input id="item-image-license" type="hidden" />
+        <div id="product-attribution" class="product-attribution full-field" hidden>
+          <img id="product-preview" alt="Produktabbildung" hidden />
+          <span>Vorschlag von <a id="product-source-link" target="_blank" rel="noopener noreferrer"></a> · Daten bitte prüfen</span>
+        </div>
         <label class="field full-field">Artikelname <span>*</span>
           <input id="item-name" name="name" required maxlength="160" placeholder="z. B. Olivenöl" />
         </label>
@@ -116,6 +123,15 @@
           <input id="item-barcode" name="barcode" maxlength="64" inputmode="numeric" placeholder="Code eintippen oder scannen" />
         </label>
         <div class="form-grid">
+          <label class="field">Marke <span class="optional">optional</span>
+            <input id="item-brand" name="brand" maxlength="120" placeholder="Marke" />
+          </label>
+          <label class="field">Packungsgröße <span class="optional">optional</span>
+            <input id="item-product-size" name="product_size" maxlength="80" placeholder="z. B. 500 ml" />
+          </label>
+          <label class="field full-field">Bild-URL <span class="optional">optional · Open-Facts-Bildquellen</span>
+            <input id="item-image-url" name="image_url" type="url" maxlength="2048" placeholder="HTTPS-Bildadresse" />
+          </label>
           <label class="field">Kategorie
             <input id="item-category" name="category" list="category-options" maxlength="80" placeholder="Sonstiges" />
             <datalist id="category-options">
@@ -173,7 +189,13 @@
         <div><dt>Kategorie</dt><dd id="detail-category"></dd></div>
         <div><dt>Lagerort</dt><dd id="detail-location"></dd></div>
         <div><dt>Barcode</dt><dd id="detail-barcode"></dd></div>
+        <div><dt>Marke</dt><dd id="detail-brand"></dd></div>
+        <div><dt>Packungsgröße</dt><dd id="detail-product-size"></dd></div>
       </dl>
+      <div id="detail-product-media" class="product-attribution" hidden>
+        <img id="detail-product-image" alt="Produktabbildung" hidden />
+        <span>Produktdaten: <a id="detail-product-source" target="_blank" rel="noopener noreferrer"></a></span>
+      </div>
       <div class="detail-note" id="detail-notes-wrap" hidden><span>Notiz</span><p id="detail-notes"></p></div>
       <p class="detail-footnote">Der Scan hat den Bestand nicht verändert.</p>
       <div class="dialog-actions">
@@ -187,7 +209,7 @@
         <div><p class="eyebrow">SCHNELLER ZUGRIFF</p><h2>Barcode scannen</h2></div>
         <button class="icon-button" id="close-scan-dialog" type="button" aria-label="Schließen">×</button>
       </div>
-      <p class="scan-copy">Ein bekannter Code öffnet den Artikel, ein unbekannter Code startet die Erfassung. Der Scan ändert nie den Bestand.</p>
+      <p class="scan-copy">Ein bekannter Code öffnet den Artikel. Bei unbekannten Codes suchen wir passende Produktdaten und füllen das Formular vor. Nichts wird ohne „Artikel speichern“ angelegt oder am Bestand verändert.</p>
       <p class="camera-limitation">Die Kamera nutzt ZXing im Browser und benötigt eine sichere HTTPS-Verbindung. iOS/Safari-Kameraerkennung hängt von iOS-Version, Berechtigungen und Browserkontext ab. Manuelle Eingabe bleibt verfügbar.</p>
       <div class="camera-wrap" id="camera-wrap" hidden>
         <video id="camera-video" playsinline muted></video>

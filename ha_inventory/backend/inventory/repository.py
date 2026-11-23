@@ -18,6 +18,12 @@ class InventoryRepository:
         "location",
         "minimum_quantity",
         "notes",
+        "brand",
+        "product_size",
+        "image_url",
+        "image_license",
+        "data_source",
+        "source_url",
         "created_at",
         "updated_at",
     }
@@ -40,8 +46,8 @@ class InventoryRepository:
         params: list[Any] = []
         if search:
             pattern = f"%{search}%"
-            clauses.append("(name LIKE ? OR barcode LIKE ? OR location LIKE ?)")
-            params.extend((pattern, pattern, pattern))
+            clauses.append("(name LIKE ? OR brand LIKE ? OR barcode LIKE ? OR location LIKE ?)")
+            params.extend((pattern, pattern, pattern, pattern))
         if category:
             clauses.append("category = ? COLLATE NOCASE")
             params.append(category)

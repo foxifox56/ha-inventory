@@ -6,6 +6,7 @@ import math
 import sqlite3
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlsplit
 
 from ..errors import InventoryError
 from .repository import InventoryRepository
@@ -19,7 +20,19 @@ class InventoryService:
         "unit": 40,
         "location": 160,
         "notes": 1000,
+        "brand": 120,
+        "product_size": 80,
+        "image_url": 2048,
+        "image_license": 80,
+        "data_source": 80,
+        "source_url": 2048,
     }
+    FACTS_ROOTS = (
+        "openfoodfacts.org",
+        "openbeautyfacts.org",
+        "openpetfoodfacts.org",
+        "openproductsfacts.org",
+    )
     TRACKING_MODES = {"simple", "inventory", "exact"}
     SIMPLE_STATUSES = {"unknown", "present", "out_of_stock"}
     UPDATE_FIELDS = set(TEXT_LIMITS) | {
@@ -59,6 +72,33 @@ class InventoryService:
                 f"Darf höchstens {self.TEXT_LIMITS[field]} Zeichen lang sein.",
                 field=field,
             )
+        if field in {"image_url", "source_url"} and value:
+            parsed = urlsplit(value)
+            hostname = (parsed.hostname or "").lower().rstrip(".")
+            try:
+                port = parsed.port
+            except ValueError:
+                port = -1
+            if field == "image_url":
+                valid_host = any(
+                    hostname == root or hostname.endswith("." + root)
+                    for root in self.FACTS_ROOTS
+                )
+            else:
+                # Source links are navigated by the user only; allow future
+                # provider domains while rejecting non-HTTPS/credential URLs.
+                valid_host = bool(hostname)
+            if (
+                parsed.scheme != "https"
+                or not valid_host
+                or parsed.username is not None
+                or parsed.password is not None
+                or port not in (None, 443)
+            ):
+                raise InventoryError(
+                    "Bild- und Quellen-URLs müssen sichere Open-Facts-HTTPS-Adressen sein.",
+                    field=field,
+                )
         return value
 
     @staticmethod
@@ -182,6 +222,12 @@ class InventoryService:
             )
             or 0,
             "notes": self._text(payload, "notes"),
+            "brand": self._text(payload, "brand"),
+            "product_size": self._text(payload, "product_size"),
+            "image_url": self._text(payload, "image_url"),
+            "image_license": self._text(payload, "image_license"),
+            "data_source": self._text(payload, "data_source"),
+            "source_url": self._text(payload, "source_url"),
             "created_at": now,
             "updated_at": now,
         }

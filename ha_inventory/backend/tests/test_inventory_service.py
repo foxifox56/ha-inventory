@@ -25,6 +25,28 @@ class InventoryServiceTests(unittest.TestCase):
         self.assertEqual(item["barcode"], "0040123456789")
         self.assertEqual(self.service.get_by_barcode("0040123456789")["id"], item["id"])
 
+    def test_product_metadata_roundtrips_and_unsafe_image_urls_are_rejected(self) -> None:
+        product = self.service.create({
+            "name": "Haferdrink", "barcode": "000099", "brand": "Beispiel",
+            "product_size": "1 l", "category": "Lebensmittel",
+            "image_url": "https://images.openfoodfacts.org/picture.jpg",
+            "data_source": "Open Food Facts",
+            "source_url": "https://world.openfoodfacts.org/product/000099",
+        })
+        self.assertEqual(product["barcode"], "000099")
+        self.assertEqual(product["brand"], "Beispiel")
+        self.assertEqual(product["product_size"], "1 l")
+        self.assertEqual(product["data_source"], "Open Food Facts")
+        changed = self.service.update(product["id"], {"brand": "Neue Marke"})
+        self.assertEqual(changed["brand"], "Neue Marke")
+        self.assertEqual(changed["quantity"], product["quantity"])
+
+        with self.assertRaises(InventoryError) as raised:
+            self.service.create({
+                "name": "Fremdbild", "image_url": "http://attacker.example/image.jpg"
+            })
+        self.assertEqual(raised.exception.field, "image_url")
+
     def test_create_defaults_to_unknown_simple_stock_without_phantom_quantity(self) -> None:
         item = self.service.create({"name": "Hammer"})
         self.assertEqual(item["category"], "Sonstiges")

@@ -16,6 +16,23 @@ Die SQLite-Datei im Add-on-Verzeichnis `/data` ist die einzige Artikeldatenbank.
 
 Die API ist der fachliche Integrationsvertrag; das Frontend ist nur ein API-Client. Artikelregeln liegen im Service, HTTP-Routing im Web-Adapter und die Home-Assistant-Verpackung im Add-on. Ein API-Versionswechsel wird über einen Pfad wie `/api/v2` eingeführt, nicht über UI-spezifische Endpunkte. Die Spezifikation steht in [API.md](API.md).
 
+## Produkterkennung und Provider
+
+```text
+Frontend → Ingress/API → ProductLookupService → Open Facts
+                 └────→ InventoryService → SQLite
+```
+
+`GET /api/v1/product-lookup/{barcode}` fragt zuerst `InventoryService` und SQLite ab. Nur wenn lokal kein Barcode-Treffer existiert, fragt `ProductLookupService` seine Provider in definierter Reihenfolge ab. Version 0.2 registriert den `OpenFactsProvider`, der die offizielle universelle API mit `product_type=all` nutzt. Sie liefert Treffer aus Open Food Facts, Open Beauty Facts, Open Pet Food Facts oder Open Products Facts samt Produktart. Künftige Provider für Elektronik, Werkzeuge oder Ersatzteile implementieren dasselbe kleine `lookup(barcode)`-Verhalten; Handler und Frontend bleiben providerunabhängig.
+
+Der Provider verwendet HTTPS, einen fünfsekündigen Timeout und einen identifizierenden `HA-Inventory/0.2` User-Agent. Er folgt höchstens vier Weiterleitungen ausschließlich zwischen den offiziellen `world.*.open*facts.org` API-Hosts, liest maximal 512 KiB JSON und erlaubt Produktbilder nur über HTTPS-Hosts aus dem Open-Facts-Ökosystem. Ungecachte Anfragen sind pro Prozess auf eine alle 4,1 Sekunden begrenzt. Ein begrenzter In-Memory-LRU-Cache hält bis zu 256 Treffer sechs Stunden und Nichttreffer fünf Minuten; Fehler und Timeouts werden nicht gecacht und nicht wiederholt. Damit bleibt die lokale Lagerverwaltung nutzbar, wenn Open Facts ausfällt.
+
+Ein externer Treffer ist ausschließlich ein nicht persistierter Formvorschlag. Er enthält Barcode, Name, Marke, Packungsgröße, Kategorie, Bildadresse und Bildlizenz sowie Quelle und Produktseite. Der Nutzer kann alle Produktfelder bearbeiten. Erst die separate API-Mutation nach ausdrücklichem Speichern legt den Artikel an; der neue Datensatz beginnt im vorhandenen Standardmodell `simple` / `unknown` / `quantity=null`, sofern der Nutzer nicht im Formular etwas anderes auswählt. Weder Kamera- noch manuelle Suche ändert Bestand oder Lagerorte.
+
+Nur der Barcode wird an Open Facts gesendet; Artikelname, Lagerort, Menge und andere Inventardaten bleiben lokal. Open Facts dokumentiert freiwillige nutzergenerierte Daten ohne Genauigkeitsgarantie, ODbL für die Datenbank, Database Contents License für einzelne Inhalte und CC BY-SA für Produktbilder. Der Client zeigt eine Quellenverknüpfung und den providerseitig gelieferten Bild-Lizenzhinweis. Für gespeicherte Vorschläge bleiben `data_source`, `source_url` und `image_license` als Attributionsmetadaten erhalten. Quell-URLs müssen HTTPS nutzen; Bild-URLs müssen zusätzlich von für den Provider freigegebenen Hosts stammen. Vor einer Veröffentlichung, einem Export oder einem anderen Nutzungsszenario müssen die aktuellen Open-Facts-Bedingungen geprüft werden. Quellen: [API-Dokumentation](https://openfoodfacts.github.io/openfoodfacts-server/api/) und [universelle Barcode-Suche über die Facts-Projekte](https://openfoodfacts.github.io/openfoodfacts-server/api/tutorials/scanning-cosmetics-pet-food-and-other-products/).
+
+Die zusätzliche Artikeltabelle-Migration v4 fügt nur optionale Produktmetadaten-Spalten mit leeren Standardwerten hinzu. Bestehende IDs, Barcodes, Kategorien, Notizen, Lagerorte, Bestandsmodell und bestätigte Mengen bleiben erhalten. Die Integration bleibt SQLite-exklusiv; andere Apps greifen weiter über die dokumentierte Ingress-API zu.
+
 ## Zugriffsschutz
 
 - Jeder HTTP-Zugriff bleibt auf Home Assistant Ingress begrenzt. Ingress authentifiziert Home-Assistant-Nutzer und leitet nur über den Supervisor-Proxy an die App weiter.

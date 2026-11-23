@@ -2,38 +2,50 @@
 
 HA Inventory ist eine lokale, modulare Lagerverwaltung für Home Assistant. Version 0.2 gestaltet die Oberfläche für das iPhone neu, behält die Desktopansicht bei und ergänzt eine versionierte REST-API als Integrationsvertrag. Die SQLite-Datenbank bleibt auf dem Home-Assistant-Gerät.
 
-**Ein Scan ändert niemals den Bestand.** Ein bekannter Barcode öffnet die Artikeldetails, ein unbekannter Barcode startet die Erfassung. Bestand und Mengen ändern sich nur durch eine ausdrücklich gespeicherte Bearbeitung.
+**Ein Scan ändert niemals den Bestand und legt keinen Artikel an.** Ein bekannter Barcode öffnet die Artikeldetails. Bei einem unbekannten Code versucht der Backend-Provider eine Produkterkennung und öffnet danach ein vorausgefülltes, editierbares Formular. Ohne ausdrückliches „Artikel speichern“ wird nichts angelegt. Bestand und Mengen ändern sich nur durch eine ausdrücklich gespeicherte Bearbeitung.
 
 ## Version 0.2
 
 - Mobile-first Lagerübersicht mit fester Navigation für Start, Suche, Scanner und Lagerorte
 - Artikelkarten für Smartphones, vollwertige Desktopansicht, große Touch-Ziele und Unterstützung des System-Dark-Modes
 - Lokaler ZXing-Kamera-Decoder mit manuellem Barcode-Fallback
+- Lokaler Datenbanktreffer vor externer Produktsuche über Open Food Facts, Open Beauty Facts, Open Pet Food Facts und Open Products Facts
+- Erkannte Produktdaten (Name, Marke, Packungsgröße, Kategorie und gegebenenfalls Bild) werden als editierbare Vorschläge angezeigt; gespeichert wird erst nach „Artikel speichern“
 - Versionierte API unter `/api/v1` für Artikel, Kategorien, Lagerorte, Bestandsstatus sowie Erstellen, Ändern und Löschen von Artikeln
 - Dauerhafte, barcode-unabhängige IDs aus SQLite `AUTOINCREMENT`; Version-0.1-IDs werden bei Schema-Updates erhalten
 - Lesezugriff über Home-Assistant-Ingress; Schreibzugriffe zusätzlich über ein kurzlebiges Schreib-Token
 - Keine direkte Datenbankverbindung für andere Anwendungen und kein neu geöffneter Host-Port
 - PWA- und Home-Screen-Optionen sind untersucht und in [docs/PWA-architecture.md](docs/PWA-architecture.md) verglichen. Eine vollständige PWA wird noch nicht ausgeliefert.
 
-Die API-Spezifikation befindet sich in [docs/API.md](docs/API.md). Die längerfristige Integrationsarchitektur für Sensoren, Aktionen, Ereignisse und To-do-/Einkaufslisten steht in [docs/architecture.md](docs/architecture.md). In 0.2 ist die eigenständige HA-Integration noch nicht installierbar; sie wartet auf einen sicheren authentifizierten Integrationszugang.
+Die API-Spezifikation einschließlich Produktsuche befindet sich in [docs/API.md](docs/API.md). Die längerfristige Integrationsarchitektur für Sensoren, Aktionen, Ereignisse und To-do-/Einkaufslisten steht in [docs/architecture.md](docs/architecture.md). In 0.2 ist die eigenständige HA-Integration noch nicht installierbar; sie wartet auf einen sicheren authentifizierten Integrationszugang.
 
 ## ZXing und iPhone-Kamera
 
-`@zxing/browser` 0.2.1 ist lokal in der Anwendung gebündelt. Es gibt zur Laufzeit keinen CDN-Aufruf. Der Kamera-Scan braucht HTTPS beziehungsweise einen sicheren Browserkontext und eine Kamerafreigabe. iOS/Safari, Ingress-Pfad, Nabu Casa und iOS-Version können sich auf Kamera und Anmeldung auswirken; deshalb bleibt die manuelle Eingabe immer verfügbar. Der Scanner wurde automatisiert getestet, aber in dieser Entwicklungsrunde nicht mit einer echten iPhone-Kamera geprüft.
+`@zxing/browser` 0.2.1 ist lokal in der Anwendung gebündelt. Es gibt zur Laufzeit keinen CDN-Aufruf. Der Kamera-Scan braucht HTTPS beziehungsweise einen sicheren Browserkontext und eine Kamerafreigabe. iOS/Safari, Ingress-Pfad, Nabu Casa und iOS-Version können sich auf Kamera und Anmeldung auswirken; deshalb bleibt die manuelle Eingabe immer verfügbar. Die Kamera wurde automatisiert mit Mocks getestet, aber in dieser Entwicklungsrunde nicht mit einem echten iPhone geprüft. Vor einer Aussage zur iPhone-Tauglichkeit muss die manuelle Checkliste in [TESTING.md](TESTING.md) auf iPhone und Home Assistant ausgeführt werden.
+
+## Automatische Produkterkennung
+
+Der Browser sendet nur den Barcode an `GET /api/v1/product-lookup/{barcode}`. Das Backend prüft zuerst die lokale SQLite-Datenbank und fragt nur bei einem lokalen Fehltreffer die gemeinsame Open-Facts-Barcode-API über HTTPS ab. Das API-`product_type=all` deckt Lebensmittel, Kosmetik, Tiernahrung und allgemeine Produkte ab. Das Antwortfeld `product_type` ordnet die Quelle und eine passende Standardkategorie zu. Siehe die [Open Facts API-Dokumentation](https://openfoodfacts.github.io/openfoodfacts-server/api/) und die Dokumentation zur [universellen Barcode-Suche](https://openfoodfacts.github.io/openfoodfacts-server/api/tutorials/scanning-cosmetics-pet-food-and-other-products/).
+
+Die API-Daten sind freiwillige Community-Daten und können fehlen, veraltet oder falsch sein. Das Formular bleibt bearbeitbar und zeigt Datenquelle sowie Lizenzhinweis zur Produktabbildung. Bilder werden nur von HTTPS-Hosts des Open-Facts-Ökosystems geladen. Die API nennt 15 Produkt-Leseanfragen pro IP und Minute; HA Inventory begrenzt ungecachte Abfragen zusätzlich auf höchstens eine Anfrage in 4,1 Sekunden und hält höchstens 256 Cacheeinträge im Arbeitsspeicher (Treffer sechs Stunden, Nichttreffer fünf Minuten). Fehler, Zeitüberschreitungen, Rate-Limits und ungültige Antworten lassen die lokale Lagerverwaltung nutzbar und öffnen das normale Formular mit Barcode.
+
+Open Facts nennt ODbL für die Datenbank, eine Database Contents License für einzelne Inhalte und CC BY-SA für Produktbilder. Bei Speicherung eines erkannten Vorschlags bleiben Quelle, Produktseite und Bildlizenz erhalten; der UI-Hinweis verlinkt auf die Quelle. Es werden keine Lagerorte, Mengen oder persönlichen Bestandsdaten an Open Facts übertragen. Prüfe und korrigiere Vorschläge vor dem Speichern. Weitere Provider können über `backend/product_lookup` ergänzt werden, ohne UI oder SQLite direkt an einen Anbieter zu koppeln. Details: [docs/architecture.md](docs/architecture.md), [docs/API.md](docs/API.md).
 
 ## Installation auf Home Assistant OS
 
 Die Home-Assistant-App unterstützt `aarch64` und `amd64`. Für einen Raspberry Pi 4 ist **Home Assistant OS 64-bit** (`rpi4-64`/`aarch64`) erforderlich. Die nicht unterstützte 32-Bit-Architektur `armv7` ist nicht enthalten. Der Supervisor baut das Image aus der `Dockerfile`; der erste Build auf dem Pi kann einige Minuten dauern. CI baut und startet das Image für AMD64 und ARM64.
 
-Das GitHub-Repository ist privat und kann nicht über eine normale Repository-URL aus dem App Store installiert werden. Nach der Überprüfung kannst du die geprüfte Branch lokal bereitstellen:
+Das GitHub-Repository ist öffentlich. Der Review-Branch kann im Home-Assistant-App-Store als Repository mit Branch-Suffix hinzugefügt werden:
 
-1. Lade `development/v0.2` als ZIP herunter und entpacke es.
-2. Öffne über Samba den Home-Assistant-Ordner **`local_apps`** (im Terminal-&-SSH-Add-on: **`/local_apps`**).
-3. Lege dort `ha_inventory` an und kopiere den Inhalt des Projektordners `ha_inventory/` hinein. `local_apps/ha_inventory/config.yaml` muss direkt existieren.
-4. Öffne **Einstellungen → Apps**, wähle im App-Menü **Nach Updates suchen** und aktualisiere die Ansicht.
-5. Installiere **HA Inventory** aus **Local apps**, starte die App und öffne ihre Web-Oberfläche.
+```text
+https://github.com/foxifox56/ha-inventory#development/v0.2
+```
 
-Der aktuelle Bereitstellungspfad folgt der [offiziellen Anleitung für lokale Apps](https://developers.home-assistant.io/docs/apps/testing/). Ältere Beispiele mit `addons` beziehungsweise `/addons` verwenden einen veralteten Alias oder Container-Mount; auf dem Host ist `local_apps` der aktuelle Ordner. Der private Repository-Status verhindert aktuell automatische Updates aus einem App-Store-Repository.
+In Home Assistant: **Einstellungen → Apps → Installieren → ⋮ → Repositories**, URL hinzufügen und danach **HA Inventory** aus diesem Repository auswählen. Die offizielle [Home Assistant-Anleitung zu App-Repositories](https://developers.home-assistant.io/docs/apps/guides/repository/) bestätigt `#branch` als Weg, einen anderen Branch als den Standardbranch auszuwählen. `development/v0.2` ist ein Review-Branch und kann sich ändern.
+
+**Daten und Upgrade:** Vor jedem Upgrade ein vollständiges Home-Assistant-Backup mit App-Daten erstellen und außerhalb des Geräts ablegen. `backup: cold` sichert SQLite bei gestopptem App-Container. Der Supervisor verwendet die Repository-URL einschließlich Branch für die Repository-ID; ein Wechsel von lokaler Installation oder anderem Branch kann daher eine andere App-ID und ein anderes `/data` erzeugen. Die vorhandene Datenbank wird dann nicht automatisch übernommen. Installiere den Review-Branch nicht parallel zu einem produktiven Bestand und kopiere keine laufende SQLite-Datei. Ein Update derselben App-Identität nutzt den vorhandenen App-Datenspeicher; ein Backup-/Restore zwischen unterschiedlichen App-IDs wurde hier nicht auf einem Supervisor geprüft. Vor einem Branch-Wechsel muss der unterstützte Backup-/Restore-Pfad auf einer separaten HA-Testinstanz verifiziert werden. Beim Rollback zuerst die Test-App stoppen und den Restore-Pfad prüfen; die bisherige App nicht entfernen, bevor Daten und Rückkehrweg geprüft sind.
+
+Lokale Entwicklung folgt weiterhin der [offiziellen Anleitung für lokale Apps](https://developers.home-assistant.io/docs/apps/testing/): Host-Ordner `local_apps`, darin `ha_inventory/config.yaml`. Die lokale Entwicklungsinstallation und das öffentliche Git-Repository sind getrennte Supervisor-Repositories.
 
 **Die Entwicklungsarbeit hat keine Änderungen auf deinem produktiven Home Assistant oder Raspberry Pi vorgenommen.** Die Schritte oben verändern das System und sind nur für einen späteren, von dir gewünschten Test gedacht.
 
@@ -66,6 +78,8 @@ python3 -m unittest discover -s backend/tests -v
 node --test frontend/tests/*.test.mjs
 python3 -m compileall -q backend
 node --check frontend/app.js
+node --check frontend/api-client.mjs
+node --check frontend/product-prefill.mjs
 node --check frontend/vendor/zxing-browser.mjs
 ```
 

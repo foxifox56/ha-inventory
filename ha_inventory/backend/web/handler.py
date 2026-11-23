@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from ..errors import InventoryError
 from ..inventory.service import InventoryService
+from ..product_lookup.provider import ProductLookupError
 
 
 FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
@@ -34,6 +35,7 @@ def ingress_request_allowed(client_ip: str, required: bool = True) -> bool:
 
 class InventoryRequestHandler(BaseHTTPRequestHandler):
     inventory: InventoryService
+    product_lookup: object
     require_ingress_proxy = True
     write_tokens: dict[str, float] = {}
     write_tokens_lock = threading.Lock()
@@ -99,7 +101,10 @@ class InventoryRequestHandler(BaseHTTPRequestHandler):
     def _allow_request(self) -> bool:
         if ingress_request_allowed(self.client_address[0], self.require_ingress_proxy):
             return True
-        self._json_response(403, {"error": "Zugriff nur über Home Assistant Ingress."})
+        self._json_response(
+            403,
+            {"code": "ingress_required", "error": "Zugriff nur über Home Assistant Ingress."},
+        )
         return False
 
     def _get_api(self, path: str, query: dict[str, list[str]]) -> None:
@@ -110,6 +115,21 @@ class InventoryRequestHandler(BaseHTTPRequestHandler):
             return
         if api_root == "/api/v1/" and api_path == "/write-session":
             self._issue_write_session()
+            return
+        product_lookup_prefix = "/product-lookup/"
+        if api_root == "/api/v1/" and api_path.startswith(product_lookup_prefix):
+            barcode = unquote(api_path[len(product_lookup_prefix) :])
+            try:
+                result = self.product_lookup.lookup(barcode)
+                self._json_response(200, result)
+            except InventoryError as error:
+                self._inventory_error(error)
+            except ProductLookupError as error:
+                self._json_response(
+                    503,
+                    {"code": "product_lookup_unavailable", "status": "unavailable",
+                     "barcode": barcode, "error": str(error)},
+                )
             return
         if api_path == "/items":
             items = self.inventory.list_items(
@@ -193,7 +213,10 @@ class InventoryRequestHandler(BaseHTTPRequestHandler):
             return True
         self._json_response(
             403,
-            {"error": "Schreibzugriff benötigt eine gültige HA-Inventory-Schreibsitzung."},
+            {
+                "code": "write_session_invalid",
+                "error": "Schreibzugriff benötigt eine gültige HA-Inventory-Schreibsitzung.",
+            },
         )
         return False
 
@@ -259,6 +282,10 @@ class InventoryRequestHandler(BaseHTTPRequestHandler):
         self.send_header(
             "Content-Security-Policy",
             "default-src 'self'; script-src 'self'; style-src 'self'; "
-            "img-src 'self' data:; connect-src 'self'; media-src 'self' blob:; "
+            "img-src 'self' data: https://openfoodfacts.org https://*.openfoodfacts.org "
+            "https://openbeautyfacts.org https://*.openbeautyfacts.org "
+            "https://openpetfoodfacts.org https://*.openpetfoodfacts.org "
+            "https://openproductsfacts.org https://*.openproductsfacts.org; "
+            "connect-src 'self'; media-src 'self' blob:; "
             "object-src 'none'; base-uri 'self'; frame-ancestors 'self'",
         )

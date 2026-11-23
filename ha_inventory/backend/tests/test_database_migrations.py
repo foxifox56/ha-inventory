@@ -96,3 +96,51 @@ class DatabaseMigrationTests(unittest.TestCase):
         self.assertEqual(migrated["stock_status"], "unknown")
         self.assertEqual(migrated["barcode"], "0007")
         self.assertEqual(migrated["notes"], "Altbestand")
+
+    def test_v3_enrichment_migration_preserves_existing_items_and_stock(self) -> None:
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        connection = sqlite3.connect(self.data_dir / "inventory.sqlite3")
+        try:
+            connection.executescript(
+                """CREATE TABLE schema_migrations (
+                       version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+                   CREATE TABLE inventory_items (
+                       id INTEGER PRIMARY KEY AUTOINCREMENT,
+                       name TEXT NOT NULL, barcode TEXT UNIQUE,
+                       category TEXT NOT NULL DEFAULT 'Sonstiges',
+                       quantity REAL DEFAULT NULL CHECK(quantity IS NULL OR quantity >= 0),
+                       unit TEXT NOT NULL DEFAULT 'Stück', location TEXT NOT NULL DEFAULT '',
+                       minimum_quantity REAL NOT NULL DEFAULT 0 CHECK(minimum_quantity >= 0),
+                       notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
+                       updated_at TEXT NOT NULL,
+                       tracking_mode TEXT NOT NULL DEFAULT 'simple'
+                           CHECK(tracking_mode IN ('simple', 'inventory', 'exact')),
+                       stock_status TEXT NOT NULL DEFAULT 'unknown'
+                           CHECK(stock_status IN ('unknown', 'present', 'out_of_stock', 'known')));
+                   INSERT INTO schema_migrations VALUES (3, '2026-11-23T00:00:00Z');
+                   INSERT INTO inventory_items (
+                       id, name, barcode, category, quantity, unit, location,
+                       minimum_quantity, notes, created_at, updated_at, tracking_mode,
+                       stock_status
+                   ) VALUES (
+                       27, 'Dübel', '00027', 'Werkzeuge', 12, 'Stück', 'Werkstatt',
+                       3, 'Bestätigter Bestand', '2026-11-20T00:00:00Z',
+                       '2026-11-21T00:00:00Z', 'exact', 'known'
+                   );"""
+            )
+        finally:
+            connection.close()
+
+        database = Database(self.data_dir)
+        database.initialize()
+        migrated = InventoryService(InventoryRepository(database)).get(27)
+        self.assertEqual(migrated["id"], 27)
+        self.assertEqual(migrated["barcode"], "00027")
+        self.assertEqual(migrated["quantity"], 12)
+        self.assertEqual(migrated["stock_status"], "known")
+        self.assertEqual(migrated["tracking_mode"], "exact")
+        self.assertEqual(migrated["notes"], "Bestätigter Bestand")
+        self.assertEqual(migrated["brand"], "")
+        self.assertEqual(migrated["product_size"], "")
+        self.assertEqual(migrated["image_url"], "")
+        self.assertEqual(migrated["image_license"], "")

@@ -81,6 +81,7 @@ kbd { min-width: 21px; padding: 2px 5px; border: 1px solid var(--line); border-r
 .item-copy { min-width: 0; }
 .item-name { overflow: hidden; color: var(--ink); font-size: 14px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
 .item-barcode { margin-top: 3px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.item-brand { margin-top: 3px; color: var(--muted); font-size: 11px; }
 .item-category { grid-area: category; justify-self: start; max-width: 100%; overflow: hidden; padding: 4px 8px; border-radius: 7px; color: var(--muted); background: var(--soft); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .item-quantity { grid-area: quantity; justify-self: end; color: var(--ink); font-size: 12px; font-weight: 700; text-align: right; }
 .item-quantity.low-stock { color: var(--amber); }
@@ -157,6 +158,10 @@ footer span { margin: 0 5px; }
 .detail-note > span { display: block; }
 .detail-note p { margin: 0; color: var(--ink); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .detail-footnote { margin: 12px 0 0; color: var(--muted); font-size: 11px; }
+.product-attribution { display: flex; align-items: center; gap: 12px; margin: 0 0 15px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 13px; color: var(--muted); background: var(--soft); font-size: 11px; line-height: 1.45; }
+.product-attribution a { color: var(--accent); font-weight: 650; }
+.product-attribution img { flex: 0 0 auto; width: 58px; height: 58px; border-radius: 9px; object-fit: contain; background: var(--surface); }
+#detail-product-media { margin-top: 12px; }
 .toast { position: fixed; z-index: 10; right: 16px; bottom: calc(84px + env(safe-area-inset-bottom)); left: 16px; max-width: 520px; margin: 0 auto; padding: 13px 16px; border-radius: 13px; color: #fff; background: #282a38; box-shadow: 0 10px 30px #15172330; font-size: 13px; opacity: 0; transform: translateY(8px); pointer-events: none; transition: .18s ease; }
 .toast.visible { opacity: 1; transform: translateY(0); }
 

@@ -43,8 +43,12 @@ jobs:
           node --test frontend/tests/*.test.mjs
           python -m compileall -q backend
           node --check frontend/app.js
+          node --check frontend/api-client.mjs
+          node --check frontend/product-prefill.mjs
           node --check frontend/stock.mjs
           node --check frontend/barcode-lookup.mjs
+          node --check frontend/product-prefill.mjs
+          node --check frontend/api-client.mjs
           node --check frontend/mobile-navigation.mjs
           node --check frontend/zxing-scanner.mjs
           node --check frontend/vendor/zxing-browser.mjs

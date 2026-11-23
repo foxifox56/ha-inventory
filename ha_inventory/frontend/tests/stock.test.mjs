@@ -41,7 +41,7 @@ test('a known barcode opens the item details callback without changing stock', a
   let opened;
   const result = await lookupBarcodeValue('  0004  ', async (barcode) => {
     assert.equal(barcode, '0004');
-    return item;
+    return { status: 'local', item };
   }, {
     found: (foundItem) => { opened = foundItem; },
     missing: () => assert.fail('known barcode should not start item creation'),
@@ -55,11 +55,7 @@ test('a known barcode opens the item details callback without changing stock', a
 
 test('an unknown barcode is passed to the new-item callback', async () => {
   let newBarcode;
-  const result = await lookupBarcodeValue('0099', async () => {
-    const error = new Error('not found');
-    error.status = 404;
-    throw error;
-  }, {
+  const result = await lookupBarcodeValue('0099', async () => ({ status: 'not_found' }), {
     found: () => assert.fail('unknown barcode cannot open an existing item'),
     missing: (barcode) => { newBarcode = barcode; },
     failed: (error) => { throw error; },

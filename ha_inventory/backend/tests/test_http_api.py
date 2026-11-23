@@ -10,13 +10,17 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from backend.app import create_handler
+from backend.product_lookup.provider import ProductCandidate, ProductLookupUnavailable
+from backend.product_lookup.service import ProductLookupService
 from backend.web.handler import ingress_request_allowed
 
 
 class HttpApiTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
-        handler = create_handler(Path(self.temp_dir.name), ingress_ip_check=False)
+        handler = create_handler(
+            Path(self.temp_dir.name), ingress_ip_check=False, product_providers=[]
+        )
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -185,6 +189,112 @@ class HttpApiTests(unittest.TestCase):
         self.assertFalse(ingress_request_allowed("172.30.32.3"))
         self.assertTrue(ingress_request_allowed("127.0.0.1", required=False))
 
+    def use_product_provider(self, provider) -> None:
+        handler = self.server.RequestHandlerClass
+        handler.product_lookup = ProductLookupService(handler.inventory, [provider])
+
+    def test_product_lookup_checks_local_inventory_first_and_never_changes_stock(self) -> None:
+        class ShouldNotBeCalled:
+            name = "test-provider"
+
+            def lookup(self, barcode):
+                raise AssertionError("local barcode hit must not call providers")
+
+        self.use_product_provider(ShouldNotBeCalled())
+        _, session, _ = self.request("/api/v1/write-session")
+        headers = {"X-HA-Inventory-Write-Token": session["write_token"]}
+        status, created, _ = self.request(
+            "/api/v1/items", "POST",
+            {"name": "Schrauben", "barcode": "00042", "tracking_mode": "exact",
+             "quantity": 6, "stock_status": "known"},
+            headers,
+        )
+        self.assertEqual(status, 201)
+        item_id = created["item"]["id"]
+        status, result, _ = self.request("/api/v1/product-lookup/00042")
+        self.assertEqual(status, 200)
+        self.assertEqual(result["status"], "local")
+        self.assertEqual(result["item"]["id"], item_id)
+        current = self.request(f"/api/v1/items/{item_id}")[1]["item"]
+        self.assertEqual(current["quantity"], 6)
+        self.assertEqual(current["stock_status"], "known")
+
+    def test_external_product_lookup_returns_suggestions_without_saving(self) -> None:
+        class Provider:
+            name = "test-provider"
+            calls = 0
+
+            def lookup(self, barcode):
+                self.calls += 1
+                return ProductCandidate(
+                    barcode=barcode, name="Haferdrink", brand="Beispiel", product_size="1 l",
+                    category="Lebensmittel", image_url="https://images.openfoodfacts.org/p.jpg",
+                    image_license="CC BY-SA",
+                    data_source="Open Food Facts",
+                    source_url=f"https://world.openfoodfacts.org/product/{barcode}",
+                )
+
+        provider = Provider()
+        self.use_product_provider(provider)
+        status, result, _ = self.request("/api/v1/product-lookup/000123")
+        self.assertEqual(status, 200)
+        self.assertEqual(result["status"], "identified")
+        self.assertEqual(result["product"]["barcode"], "000123")
+        self.assertEqual(result["product"]["name"], "Haferdrink")
+        self.assertEqual(result["product"]["brand"], "Beispiel")
+        self.assertEqual(result["product"]["product_size"], "1 l")
+        self.assertEqual(provider.calls, 1)
+        self.assertEqual(self.request("/api/v1/items")[1]["items"], [])
+
+    def test_not_found_and_unavailable_lookup_leave_local_api_usable(self) -> None:
+        class NotFound:
+            name = "not-found"
+
+            def lookup(self, barcode):
+                return None
+
+        self.use_product_provider(NotFound())
+        status, missing, _ = self.request("/api/v1/product-lookup/0099")
+        self.assertEqual((status, missing["status"]), (200, "not_found"))
+        self.assertEqual(self.request("/api/v1/items")[0], 200)
+
+        class Unavailable:
+            name = "offline"
+
+            def lookup(self, barcode):
+                raise ProductLookupUnavailable("timeout")
+
+        self.use_product_provider(Unavailable())
+        status, error, _ = self.request("/api/v1/product-lookup/0099")
+        self.assertEqual(status, 503)
+        self.assertEqual(error["status"], "unavailable")
+        self.assertEqual(self.request("/api/v1/items")[0], 200)
+
+    def test_lookup_rejects_invalid_barcode_and_remains_ingress_protected(self) -> None:
+        status, error, _ = self.request("/api/v1/product-lookup/not-a-barcode")
+        self.assertEqual(status, 400)
+        self.assertEqual(error["field"], "barcode")
+        handler = self.server.RequestHandlerClass
+        handler.require_ingress_proxy = True
+        try:
+            status, body, _ = self.request("/api/v1/product-lookup/0001")
+        finally:
+            handler.require_ingress_proxy = False
+        self.assertEqual(status, 403)
+        self.assertEqual(body["code"], "ingress_required")
+
+    def test_expired_write_session_has_specific_error_and_does_not_mutate(self) -> None:
+        _, session, _ = self.request("/api/v1/write-session")
+        handler = self.server.RequestHandlerClass
+        handler.write_tokens[session["write_token"]] = 0
+        status, body, _ = self.request(
+            "/api/v1/items", "POST", {"name": "Noch nicht gespeichert"},
+            {"X-HA-Inventory-Write-Token": session["write_token"]},
+        )
+        self.assertEqual(status, 403)
+        self.assertEqual(body["code"], "write_session_invalid")
+        self.assertEqual(self.request("/api/v1/items")[1]["items"], [])
+
     def test_database_survives_a_server_restart(self) -> None:
         _, session, _ = self.request("/api/v1/write-session")
         status, created, _ = self.request(
@@ -206,7 +316,9 @@ class HttpApiTests(unittest.TestCase):
         self.server.server_close()
         self.thread.join(timeout=2)
 
-        handler = create_handler(Path(self.temp_dir.name), ingress_ip_check=False)
+        handler = create_handler(
+            Path(self.temp_dir.name), ingress_ip_check=False, product_providers=[]
+        )
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()

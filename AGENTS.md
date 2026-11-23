@@ -3,6 +3,7 @@
 ## Architecture
 
 - `ha_inventory/backend/inventory/` owns inventory rules and persistence. Keep HTTP concerns out of this package.
+- `ha_inventory/backend/product_lookup/` owns provider protocols, remote product parsing, source attribution, cache and network safety. It must call the local inventory first through the product lookup service and never persist a result.
 - `ha_inventory/backend/web/` adapts HTTP to the service and serves static files. The canonical API contract is versioned under `/api/v1`; document compatibility and breaking changes in `docs/API.md`.
 - `ha_inventory/frontend/` is a browser-only API client. It must never read or write SQLite directly. Keep navigation, scanner lifecycle, and stock presentation in small focused modules.
 - The REST API is independent of the UI. Other applications use its documented endpoints and durable item IDs, never the database file.
@@ -16,6 +17,9 @@
 - Reads remain read-only. Mutations require the additional short-lived write session as well as Ingress. The write session is not an external API credential or a replacement for Home Assistant authorization.
 - A barcode identifies an inventory item but does not define its identity. Preserve the durable database ID if a barcode is changed or removed.
 - Scanning must never decrement, increment, or otherwise change stock automatically. Known barcodes open item details; unknown ones start a new item form.
+- Product lookup results are suggestions only. An unknown barcode can prefill editable name, brand, pack size, category, and image fields, but only an explicit protected save may create an item. A lookup must never mutate stock.
+- External providers run only on the backend. Require HTTPS, a clear User-Agent, bounded timeouts/response bodies/cache, validated redirects and image/source URLs, and graceful provider failures. Do not send locations, quantities, or other inventory data to a product provider. Keep provider-specific details out of the UI and SQLite layer.
+- Preserve source attribution and image licensing when external metadata is saved or shown. Treat external data as unverified user-contributed suggestions.
 - Stock changes happen only after a user explicitly saves an item edit. Shopping/to-do completion and future HA events must never alter inventory silently.
 - Represent presence-only, estimated inventory, and exact manual counts as distinct tracking modes. A missing count remains explicitly unknown, never zero or one.
 - Keep product lookup and other remote integrations optional. The app must remain usable without a cloud database or cloud product account.
@@ -27,6 +31,7 @@
 - Use parameterized SQL, validate all API input, and escape user-provided values before rendering HTML.
 - Preserve leading zeroes in barcodes and treat barcodes as strings.
 - Add a database migration when changing the schema; do not edit existing migrations.
+- Product metadata migrations must be additive and must preserve legacy item IDs, barcodes, notes, locations, and confirmed stock values.
 - Use the Python standard library unless an additional dependency has a clear user-facing benefit. Vendor browser dependencies locally, pin the version, and include license notices.
 - Keep the UI mobile-first, retain a usable desktop layout, provide manual barcode entry, honor reduced motion, and support system Dark Mode.
 - A PWA manifest, service worker, standalone metadata, or alternate iPhone auth flow may only be added after `docs/PWA-architecture.md`'s security questions are resolved and documented.
@@ -39,6 +44,8 @@
   python3 -m compileall -q backend
   node --check frontend/app.js
   ```
+
+- Product lookup tests must cover local-first behavior, all enabled provider types, missing fields/images, network/timeout/schema failures, leading-zero barcodes, cache/rate behavior, and proof that a lookup does not create or alter an item. Frontend tests must cover suggestions, manual fallback, loading and single explicit-save semantics.
 
 - Update `README.md`, `TESTING.md`, `docs/API.md`, and architecture notes when setup, API behavior, security, or verification changes.
 - Never install or configure this app on the user's production Home Assistant during development. Use local tests or an isolated test environment.

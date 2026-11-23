@@ -17,8 +17,17 @@ All responses are JSON with `Cache-Control: no-store`.
 | `GET /api/v1/categories` | `{"categories":["..."]}` | Current distinct category values. |
 | `GET /api/v1/locations` | `{"locations":["..."]}` | Current non-empty distinct location values. |
 | `GET /api/v1/stock-statuses` | `{"stock_statuses":[{"value":"...","label":"..."}]}` | Status vocabulary for `stock_status`. |
+| `GET /api/v1/product-lookup/{barcode}` | One of the product lookup response objects below | Local-first, read-only lookup. Barcodes are digit strings and retain leading zeroes. |
 
-An item contains `id`, `name`, `barcode`, `category`, `location`, `tracking_mode`, `stock_status`, `quantity`, `unit`, `minimum_quantity`, `notes`, `created_at`, and `updated_at`. `quantity` is `null` when the amount is unknown; it is never inferred from a barcode. `tracking_mode` is `simple`, `inventory`, or `exact`. Status is `unknown`, `present`, `out_of_stock`, or `known`.
+An item contains `id`, `name`, `barcode`, `brand`, `product_size`, `image_url`, `image_license`, `data_source`, `source_url`, `category`, `location`, `tracking_mode`, `stock_status`, `quantity`, `unit`, `minimum_quantity`, `notes`, `created_at`, and `updated_at`. `quantity` is `null` when the amount is unknown; it is never inferred from a barcode. `tracking_mode` is `simple`, `inventory`, or `exact`. Status is `unknown`, `present`, `out_of_stock`, or `known`.
+
+### Product lookup response
+
+The endpoint checks SQLite before making any remote request. An existing local barcode returns `200 {"status":"local","barcode":"...","item":{...}}`. A recognized external product returns `200 {"status":"identified","barcode":"...","product":{...}}`; the suggestion includes `name`, `brand`, `product_size`, `category`, `image_url`, `image_license`, `data_source`, and `source_url`. An external miss returns `200 {"status":"not_found","barcode":"..."}`. Invalid barcodes return `400`; provider downtime, timeout, rate-limit, or invalid provider data returns `503 {"status":"unavailable", ...}`. Ingress access failures remain `403`.
+
+This is a read-only endpoint. It never creates an item and never changes location, stock status, quantity, or any other database field. A client may prefill an editable form with `product`, but must wait for a user-confirmed `POST /api/v1/items` before persisting. The UI keeps its safe default stock state (`simple` / `unknown` / `null`); the user may choose a location and tracking mode before saving.
+
+The current provider uses the Open Facts universal v3 barcode endpoint with `product_type=all` and accepts redirects only to the four documented HTTPS API hosts. It sends the barcode only, uses a five-second timeout and a product-specific User-Agent, caps the response at 512 KiB, and does not retry failures. An in-memory LRU cache holds up to 256 hits for six hours and misses for five minutes. Uncached requests are spaced by at least 4.1 seconds per app process to stay below Open Facts' documented 15 read requests/minute/IP limit. The cache disappears at process restart. See [architecture.md](architecture.md) for provider extension, source attribution, image licensing, and known data-quality limitations.
 
 ## Write endpoints
 
@@ -33,7 +42,7 @@ Mutations require both the Ingress authenticated request and a short-lived write
 | `PATCH /api/v1/items/{id}` | `200 {"item":{...}}` | Updates only submitted fields. Stock changes only when its fields are explicitly submitted. |
 | `DELETE /api/v1/items/{id}` | `200 {"deleted":true}` | Deletes the selected item. |
 
-The extra write session is a same-origin, cross-site-request protection layer on top of Home Assistant authentication. It does **not** create separate Home Assistant user roles or authorize clients outside Ingress. Do not treat it as an API key. Direct client access, cross-origin access, bearer-token authentication, or an integration bypassing Ingress are not implemented. These require a separately reviewed authentication design before enabling an external integration.
+The extra write session is a same-origin, cross-site-request protection layer on top of Home Assistant authentication. It does **not** create separate Home Assistant user roles or authorize clients outside Ingress. Do not treat it as an API key. An expired or invalid session returns `403` with `code: "write_session_invalid"`; the browser client refreshes and retries the mutation once. Other `403` responses (for example `code: "ingress_required"`) are surfaced without retry. Direct client access, cross-origin access, bearer-token authentication, or an integration bypassing Ingress are not implemented. These require a separately reviewed authentication design before enabling an external integration.
 
 Errors return a JSON object such as `{"error":"...","field":"name"}` and an appropriate HTTP status. Duplicate barcodes return `409`; validation errors return `400`; missing items return `404`; writes without a valid session return `403`.
 
