@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#f4f5f8" />
+    <meta name="color-scheme" content="light dark" />
+    <title>HA Inventory</title>
+    <base href="./" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <a class="brand" href="./" aria-label="HA Inventory Startseite" data-home-link>
+          <span class="brand-mark" aria-hidden="true">▦</span>
+          <span>ha<span class="brand-light">inventory</span></span>
+        </a>
+        <span class="local-pill"><span></span> Zuhause gespeichert</span>
+      </header>
+
+      <main data-mobile-view="home">
+        <section class="hero">
+          <div>
+            <p class="eyebrow">DEIN LAGER AUF EINEN BLICK</p>
+            <h1>Was haben wir noch da?</h1>
+            <p class="hero-copy">Finde Artikel und Bestände schnell wieder.</p>
+          </div>
+          <div class="hero-actions">
+            <button class="button button-quiet desktop-scan-button" id="scan-button" type="button">
+              <span aria-hidden="true">▤</span> Barcode scannen
+            </button>
+            <button class="button button-quiet" id="receipt-open-button" type="button">
+              <span aria-hidden="true">▧</span> Kassenbon erfassen
+            </button>
+            <button class="button button-primary" id="add-button" type="button">
+              <span aria-hidden="true">＋</span> Artikel anlegen
+            </button>
+          </div>
+        </section>
+
+        <section class="summary" aria-label="Bestandsübersicht">
+          <article class="summary-card">
+            <span class="summary-icon indigo" aria-hidden="true">▦</span>
+            <div><span class="summary-label">Artikel</span><strong id="stat-items">0</strong></div>
+          </article>
+          <article class="summary-card">
+            <span class="summary-icon amber" aria-hidden="true">⌁</span>
+            <div><span class="summary-label">Wird knapp</span><strong id="stat-low">0</strong></div>
+          </article>
+          <article class="summary-card">
+            <span class="summary-icon mint" aria-hidden="true">⌖</span>
+            <div><span class="summary-label">Lagerorte</span><strong id="stat-locations">0</strong></div>
+          </article>
+        </section>
+
+        <section class="locations-panel" id="locations-panel" aria-labelledby="locations-heading">
+          <div class="panel-heading">
+            <div><h2 id="locations-heading">Lagerorte</h2><p>Wähle einen Ort, um seine Artikel zu sehen.</p></div>
+          </div>
+          <div class="location-list" id="location-list"></div>
+          <div class="location-empty" id="locations-empty" hidden>Noch keine Lagerorte erfasst.</div>
+        </section>
+
+        <section class="inventory-panel">
+          <div class="panel-heading">
+            <div>
+              <h2 id="inventory-heading">Dein Bestand</h2>
+              <p id="result-count">Noch keine Artikel erfasst</p>
+            </div>
+            <label class="search-box">
+              <span aria-hidden="true">⌕</span>
+              <input id="search-input" type="search" placeholder="Artikel suchen …" autocomplete="off" />
+              <kbd>/</kbd>
+            </label>
+          </div>
+          <p class="active-location" id="active-location" hidden></p>
+          <nav class="filters" id="category-filters" aria-label="Kategorien"></nav>
+          <div class="item-list" id="item-list" aria-live="polite"></div>
+          <div class="empty-state" id="empty-state" hidden>
+            <div class="empty-icon" aria-hidden="true">▦</div>
+            <h3 id="empty-title">Dein Lager ist noch leer</h3>
+            <p id="empty-copy">Lege deinen ersten Artikel an oder scanne seinen Barcode.</p>
+            <button class="button button-primary" id="empty-add-button" type="button">Ersten Artikel anlegen</button>
+          </div>
+        </section>
+        <p class="quiet-note"><span>✳</span> Scannen zeigt Artikel. Bestand änderst nur du beim Speichern.</p>
+
+        <section class="receipt-panel" id="receipt-view" aria-labelledby="receipt-heading">
+          <div class="panel-heading receipt-heading">
+            <div><p class="eyebrow">LOKALE TEXTERKENNUNG</p><h2 id="receipt-heading">Kassenbon übernehmen</h2>
+              <p>Foto aufnehmen oder aus deiner Mediathek wählen. Das Bild wird auf diesem Gerät vorbereitet und nicht dauerhaft gespeichert.</p></div>
+          </div>
+          <div class="receipt-actions">
+            <label class="button button-primary receipt-file-button" for="receipt-camera-input">▧ Bon fotografieren</label>
+            <input class="visually-hidden" id="receipt-camera-input" type="file" accept="image/*" capture="environment" />
+            <label class="button button-quiet receipt-file-button" for="receipt-library-input">Foto auswählen</label>
+            <input class="visually-hidden" id="receipt-library-input" type="file" accept="image/*" />
+          </div>
+          <button class="button button-quiet receipt-manual-button" id="receipt-manual-item" type="button">Artikel manuell erfassen</button>
+          <div id="receipt-editor" class="receipt-editor" hidden>
+            <img id="receipt-photo-preview" alt="Vorschau des Kassenbonfotos" />
+            <div class="receipt-image-tools">
+              <button class="button button-quiet" id="receipt-rotate-left" type="button">↶ 90°</button>
+              <button class="button button-quiet" id="receipt-rotate-right" type="button">↷ 90°</button>
+              <span>Ränder beschneiden</span>
+            </div>
+            <div class="receipt-crop-grid" aria-label="Bonfoto zuschneiden">
+              <label>Oben <input type="range" data-crop="top" min="0" max="30" value="0" /></label>
+              <label>Rechts <input type="range" data-crop="right" min="0" max="30" value="0" /></label>
+              <label>Unten <input type="range" data-crop="bottom" min="0" max="30" value="0" /></label>
+              <label>Links <input type="range" data-crop="left" min="0" max="30" value="0" /></label>
+            </div>
+            <button class="button button-primary" id="receipt-recognize" type="button">Kassenbon lokal erkennen</button>
+          </div>
+          <p class="camera-status receipt-status" id="receipt-status" role="status" aria-live="polite" hidden></p>
+          <div id="receipt-results" class="receipt-results" hidden>
+            <div class="receipt-meta" id="receipt-meta"></div>
+            <div id="receipt-duplicate-warning" class="receipt-warning" role="alert" hidden></div>
+            <label id="receipt-duplicate-confirm-wrap" class="confirm-stock" hidden>
+              <input id="receipt-allow-duplicate" type="checkbox" /> Ich habe den möglichen Doppelimport geprüft und möchte den Bon trotzdem separat übernehmen.
+            </label>
+            <p class="receipt-privacy">Erkannt mit lokaler OCR (<span id="receipt-ocr-languages"></span>). Foto und vollständiger OCR-Text werden nicht in HA Inventory gespeichert. Prüfe Namen und Mengen vor dem Einlagern.</p>
+            <div class="receipt-lines-heading"><h3>Erkannte Positionen</h3><span id="receipt-line-count"></span></div>
+            <div id="receipt-lines" class="receipt-lines"></div>
+            <label class="confirm-stock receipt-confirm"><input id="receipt-confirm" type="checkbox" /> Ich habe die ausgewählten Artikel, Mengen und Lagerorte geprüft.</label>
+            <button class="button button-primary receipt-import-button" id="receipt-import-button" type="button" disabled>Ausgewählte Positionen einlagern</button>
+            <button class="button button-quiet receipt-clear-button" id="receipt-clear-button" type="button">Anderen Kassenbon erfassen</button>
+          </div>
+          <div id="receipt-import-result" class="receipt-import-result" hidden>
+            <strong id="receipt-import-message"></strong>
+            <p class="receipt-undo-note" id="receipt-undo-note" hidden>Vor dem Rückgängigmachen: Es werden nur die Bestandsbuchungen aufgehoben. Neu angelegte Artikel bleiben mit unbekanntem Bestand bestehen; gelernte Produktzuordnungen bleiben erhalten.</p>
+            <button class="button button-quiet" id="receipt-undo-button" type="button" hidden>Bestandsbuchungen rückgängig machen</button>
+          </div>
+        </section>
+      </main>
+
+      <nav class="mobile-nav" aria-label="Hauptnavigation">
+        <button class="nav-tab is-active" type="button" data-view="home" aria-current="page">
+          <span class="nav-icon" aria-hidden="true">⌂</span><span>Start</span>
+        </button>
+        <button class="nav-tab" type="button" data-view="search">
+          <span class="nav-icon" aria-hidden="true">⌕</span><span>Suche</span>
+        </button>
+        <button class="nav-tab nav-scan" type="button" data-view="scanner">
+          <span class="nav-icon" aria-hidden="true">▤</span><span>Scanner</span>
+        </button>
+        <button class="nav-tab" type="button" data-view="locations">
+          <span class="nav-icon" aria-hidden="true">⌖</span><span>Lagerorte</span>
+        </button>
+        <button class="nav-tab" type="button" data-view="receipts">
+          <span class="nav-icon" aria-hidden="true">▧</span><span>Bon</span>
+        </button>
+      </nav>
+
+      <footer>HA Inventory <span>·</span> Version 0.4 <span>·</span> Deine Daten bleiben bei dir</footer>
+    </div>
+
+    <dialog id="item-dialog" class="dialog">
+      <form id="item-form" method="dialog">
+        <div class="dialog-heading">
+          <div><p class="eyebrow">ARTIKELVERWALTUNG</p><h2 id="form-title">Neuer Artikel</h2></div>
+          <button class="icon-button" id="close-item-dialog" type="button" aria-label="Schließen">×</button>
+        </div>
+        <input id="item-id" type="hidden" />
+        <input id="item-data-source" type="hidden" />
+        <input id="item-source-url" type="hidden" />
+        <input id="item-image-license" type="hidden" />
+        <div id="product-attribution" class="product-attribution full-field" hidden>
+          <img id="product-preview" alt="Produktabbildung" hidden />
+          <span>Vorschlag von <a id="product-source-link" target="_blank" rel="noopener noreferrer"></a> · Daten bitte prüfen</span>
+        </div>
+        <label class="field full-field">Artikelname <span>*</span>
+          <input id="item-name" name="name" required maxlength="160" placeholder="z. B. Olivenöl" />
+        </label>
+        <label class="field full-field">Barcode <span class="optional">optional</span>
+          <input id="item-barcode" name="barcode" maxlength="64" inputmode="text" autocapitalize="off" spellcheck="false" placeholder="Code eintippen oder scannen" />
+        </label>
+        <div class="form-grid">
+          <label class="field">Marke <span class="optional">optional</span>
+            <input id="item-brand" name="brand" maxlength="120" placeholder="Marke" />
+          </label>
+          <label class="field">Packungsgröße <span class="optional">optional</span>
+            <input id="item-product-size" name="product_size" maxlength="80" placeholder="z. B. 500 ml" />
+          </label>
+          <label class="field full-field">Bild-URL <span class="optional">optional · Open-Facts-Bildquellen</span>
+            <input id="item-image-url" name="image_url" type="url" maxlength="2048" placeholder="HTTPS-Bildadresse" />
+          </label>
+          <label class="field">Kategorie
+            <input id="item-category" name="category" list="category-options" maxlength="80" placeholder="Sonstiges" />
+            <datalist id="category-options">
+              <option>Lebensmittel</option><option>Werkzeuge</option><option>Haushalt</option><option>Sonstiges</option>
+            </datalist>
+          </label>
+          <label class="field">Lagerort
+            <input id="item-location" name="location" maxlength="160" placeholder="z. B. Vorratskammer" />
+          </label>
+          <label class="field full-field">Bestandsmodell
+            <select id="item-tracking-mode" name="tracking_mode">
+              <option value="simple">Einfacher Vorrat · vorhanden / nicht vorhanden</option>
+              <option value="inventory">Inventar · geschätzte Menge</option>
+              <option value="exact">Exakter Bestand · manuell gezählt</option>
+            </select>
+          </label>
+          <p id="create-stock-note" class="camera-status full-field" hidden>Der Artikel wird zuerst gespeichert. Im nächsten Schritt bestätigst du die erste Einlagerung als Startbestand, damit sie im Buchungsverlauf erscheint.</p>
+          <label class="field full-field" id="simple-stock-field">Status
+            <select id="item-stock-status" name="stock_status">
+              <option value="unknown">Bestand unbekannt</option>
+              <option value="present">Vorhanden</option>
+              <option value="out_of_stock">Nicht vorhanden</option>
+            </select>
+          </label>
+          <div id="numeric-stock-fields" class="form-grid full-field" hidden>
+            <label class="field">Menge <span class="optional">leer = unbekannt</span>
+              <input id="item-quantity" name="quantity" type="number" min="0" step="any" placeholder="Menge" />
+            </label>
+            <label class="field">Einheit
+              <input id="item-unit" name="unit" maxlength="40" value="Stück" placeholder="Stück, kg, Packung …" />
+            </label>
+            <label class="field">Mindestbestand <span class="optional">optional</span>
+              <input id="item-minimum" name="minimum_quantity" type="number" min="0" step="any" value="0" />
+            </label>
+          </div>
+          <p id="saved-stock-note" class="camera-status full-field" hidden>Bei gespeicherten Artikeln änderst du den Bestand über Einlagern oder Verbrauchen, damit der Vorgang im Verlauf bleibt.</p>
+          <label class="field full-field">Notiz <span class="optional">optional</span>
+            <textarea id="item-notes" name="notes" maxlength="1000" rows="2" placeholder="Zusätzliche Infos …"></textarea>
+          </label>
+        </div>
+        <p class="form-error" id="form-error" role="alert" hidden></p>
+        <div class="dialog-actions">
+          <button class="button button-quiet" id="cancel-item" type="button">Abbrechen</button>
+          <button class="button button-primary" type="submit">Artikel speichern</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="detail-dialog" class="dialog detail-dialog">
+      <div class="dialog-heading">
+        <div><p class="eyebrow">ARTIKELDETAILS</p><h2 id="detail-name"></h2></div>
+        <button class="icon-button" id="close-detail-dialog" type="button" aria-label="Schließen">×</button>
+      </div>
+      <dl class="detail-grid">
+        <div><dt>Bestand</dt><dd id="detail-stock"></dd></div>
+        <div><dt>Bestandsmodell</dt><dd id="detail-mode"></dd></div>
+        <div><dt>Kategorie</dt><dd id="detail-category"></dd></div>
+        <div><dt>Lagerort</dt><dd id="detail-location"></dd></div>
+        <div><dt>Barcode</dt><dd id="detail-barcode"></dd></div>
+        <div><dt>Marke</dt><dd id="detail-brand"></dd></div>
+        <div><dt>Packungsgröße</dt><dd id="detail-product-size"></dd></div>
+      </dl>
+      <div id="detail-product-media" class="product-attribution" hidden>
+        <img id="detail-product-image" alt="Produktabbildung" hidden />
+        <span>Produktdaten: <a id="detail-product-source" target="_blank" rel="noopener noreferrer"></a></span>
+      </div>
+      <div class="detail-note" id="detail-notes-wrap" hidden><span>Notiz</span><p id="detail-notes"></p></div>
+      <p class="detail-footnote">Der Scan hat den Bestand nicht verändert.</p>
+      <div class="dialog-actions">
+        <button class="button button-quiet" id="close-detail-button" type="button">Schließen</button>
+        <button class="button button-quiet" id="detail-history-button" type="button">Buchungsverlauf</button>
+        <button class="button button-quiet" id="detail-book-button" type="button">Einlagern / Verbrauchen</button>
+        <button class="button button-primary" id="detail-edit-button" type="button">Artikel bearbeiten</button>
+      </div>
+    </dialog>
+
+    <dialog id="booking-dialog" class="dialog">
+      <form id="booking-form" method="dialog">
+        <div class="dialog-heading">
+          <div><p class="eyebrow">BESTAND BUCHEN</p><h2 id="booking-title">Einlagern</h2></div>
+          <button class="icon-button" id="close-booking-dialog" type="button" aria-label="Schließen">×</button>
+        </div>
+        <p id="booking-item-name" class="booking-item-name"></p>
+        <p id="booking-stock-note" class="camera-status" role="status"></p>
+        <label class="field full-field">Anzahl Packungen
+          <input id="booking-quantity" type="number" min="1" step="1" inputmode="numeric" value="1" required />
+        </label>
+        <div id="initial-stock-fields" class="initial-stock-fields" hidden>
+          <label class="field full-field">Bestandsmodell
+            <select id="initial-tracking-mode">
+              <option value="exact">Exakter Bestand</option>
+              <option value="inventory">Geschätzter Bestand</option>
+            </select>
+          </label>
+          <label class="confirm-stock"><input id="confirm-initial-stock" type="checkbox" /> Ich bestätige diesen Startbestand ausdrücklich.</label>
+        </div>
+        <p class="form-error" id="booking-error" role="alert" hidden></p>
+        <div class="dialog-actions">
+          <button class="button button-quiet" id="cancel-booking" type="button">Abbrechen</button>
+          <button class="button button-primary" id="booking-submit" type="submit">Einlagern bestätigen</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="history-dialog" class="dialog history-dialog">
+      <div class="dialog-heading">
+        <div><p class="eyebrow">ÄNDERUNGEN NACHVOLLZIEHEN</p><h2 id="history-title">Buchungsverlauf</h2></div>
+        <button class="icon-button" id="close-history-dialog" type="button" aria-label="Schließen">×</button>
+      </div>
+      <div id="history-list" class="history-list" aria-live="polite"></div>
+      <p id="history-empty" class="empty-history" hidden>Noch keine Bestandsbuchungen.</p>
+      <div class="dialog-actions"><button class="button button-quiet" id="history-close-button" type="button">Schließen</button></div>
+    </dialog>
+
+    <dialog id="scan-dialog" class="dialog scan-dialog">
+      <div class="dialog-heading">
+        <div><p class="eyebrow">SCHNELLER ZUGRIFF</p><h2>Barcode scannen</h2></div>
+        <button class="icon-button" id="close-scan-dialog" type="button" aria-label="Schließen">×</button>
+      </div>
+      <p class="scan-copy">Ansehen: öffnet bekannte Artikel nur lesend. Einlagern: wähle die Menge und bestätige die Buchung; erst danach steigt der Bestand. Verbrauchen: ein Scan eines bekannten Artikels bucht die gewählte Menge sofort ab – standardmäßig 1 Einheit, ohne weitere Bestätigung. Du kannst die Buchung im Verlauf rückgängig machen. Bei unbekannten numerischen Codes können Produktdaten das Formular vorausfüllen; Speichern bleibt manuell. Unbekannte Codes werden nicht automatisch gespeichert oder gebucht.</p>
+      <p class="camera-limitation">Die Kamera nutzt ZXing im Browser und benötigt eine sichere HTTPS-Verbindung. iOS/Safari-Kameraerkennung hängt von iOS-Version, Berechtigungen und Browserkontext ab. Manuelle Eingabe bleibt verfügbar.</p>
+      <label class="field full-field">Scan-Modus
+        <select id="scan-mode">
+          <option value="view">Ansehen · Bestand bleibt unverändert</option>
+          <option value="receive">Einlagern · bestätigen</option>
+          <option value="consume">Verbrauchen · sofort buchen</option>
+        </select>
+      </label>
+      <label class="field full-field scan-quantity-field" id="scan-quantity-field" hidden>Packungen je Scan
+        <input id="scan-quantity" type="number" min="1" step="1" inputmode="numeric" value="1" />
+      </label>
+      <div class="camera-wrap" id="camera-wrap" hidden>
+        <video id="camera-video" playsinline muted></video>
+        <span class="scan-frame" aria-hidden="true"></span>
+      </div>
+      <p class="camera-status" id="camera-status" role="status" aria-live="polite" aria-atomic="true" hidden></p>
+      <button class="button button-quiet full-field" id="retry-scan-booking" type="button" hidden>Sicher abgleichen</button>
+      <button class="button button-quiet camera-button" id="camera-button" type="button" hidden>Kamera öffnen</button>
+      <label class="field full-field scan-field">Barcode eingeben oder Scanner verwenden
+        <div class="scan-input-row">
+          <input id="scan-input" autocomplete="off" inputmode="text" autocapitalize="off" spellcheck="false" placeholder="Barcode oder Artikelcode …" />
+          <button class="button button-primary" id="lookup-button" type="button">Suchen</button>
+        </div>
+      </label>
+      <button class="button button-quiet full-field" id="manual-entry-button" type="button" hidden>Manuell erfassen</button>
+      <p class="scan-hint">Ein Bluetooth- oder USB-Scanner funktioniert wie eine Tastatur. Bestätige danach mit Enter.</p>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

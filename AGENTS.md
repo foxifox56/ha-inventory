@@ -64,3 +64,10 @@
 - Update `README.md`, `TESTING.md`, `docs/API.md`, and architecture notes when setup, API behavior, security, or verification changes.
 - Never install or configure this app on the user's production Home Assistant during development. Use local tests or an isolated test environment.
 - Work on a development branch and leave integration into `main` for review. Do not configure auto-merge.
+
+
+## Separate HAOS test add-on (development/v0.4-test-app)
+
+- The reviewed v0.4 code remains under `ha_inventory/`. `ha_inventory_test/` is a separate installable package with `slug: ha-inventory-test`, manual boot, its own persistent `/data`, and Ingress-only access. Never share or migrate the regular app's database into the test app without explicit authorization.
+- Keep backend/frontend/resources byte-identical. After editing the source app, run `python scripts/sync-test-app.py --sync`, then `python scripts/sync-test-app.py --check`. The **test Dockerfile differs only by Supervisor image labels**; the sync script generates and verifies those labels. Test app name, slug, version, boot policy and docs are intentionally independent.
+- Test-branch CI must build/smoke-test `ha_inventory_test/` on `amd64` and `arm64` including OCR; the normal app/older PRs remain untouched. Neither merge nor install automatically.

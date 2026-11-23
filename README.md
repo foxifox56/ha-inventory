@@ -142,3 +142,12 @@ ha_inventory/
 ## Branch und Review
 
 Version 0.4 wird auf `development/v0.4` entwickelt und als eigener Pull Request gegen `development/v0.3` zur Überprüfung vorgelegt. Es gibt keinen automatischen Merge nach `main`.
+
+
+## Separat installierbare Test-App (v0.4)
+
+Der Review-Branch `development/v0.4-test-app` enthält neben der unveränderten regulären App in `ha_inventory/` die separate `ha_inventory_test/` mit dem **eigenen Slug `ha-inventory-test`**, einem unabhängigen persistenten App-`/data`-Verzeichnis und `boot: manual`. Kein freigegebener Host-Port. Dadurch wird die reguläre App-Datenbank nicht gemeinsam genutzt. Die Test-App ist zunächst leer und enthält keine Produktivdaten.
+
+**Bitte nicht über eine Änderung des installierten App-Branches aktualisieren!** Vor einem Test ein HA-Backup inklusive Apps erstellen; anschließend nur `ha-inventory-test` auswählen. Installation alternativ über `local_apps/ha_inventory_test`; weitere Details in [ha_inventory_test/DOCS.md](ha_inventory_test/DOCS.md). Ein echter HAOS-/Supervisor-Laufzeittest steht noch aus.
+
+Der Test-Code ist absichtlich eine vollständige, eigenständig baubare Kopie des v0.4-Codes. Nach Änderungen an `ha_inventory/` synchronisiert `python scripts/sync-test-app.py --sync` die Test-App, `--check` erzwingt Bytegleichheit im CI-Workflow. Kein Merge/Deployment wird automatisch durchgeführt.
