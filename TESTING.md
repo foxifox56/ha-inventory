@@ -38,7 +38,7 @@ bash scripts/container-smoke.sh
 INVENTORY_SMOKE_PLATFORM=linux/arm64 bash scripts/container-smoke.sh
 ```
 
-Die GitHub-Actions-Ergebnisse für die Review-Korrekturen werden nach dem Push ergänzt. Die vorherigen Läufe [#16](https://github.com/foxifox56/ha-inventory/actions/runs/45194137675) und [#15](https://github.com/foxifox56/ha-inventory/actions/runs/45194125312) decken diese Änderungen noch nicht ab.
+Der aktuelle Review-Korrekturstand bestand im PR-Workflow [#18](https://github.com/foxifox56/ha-inventory/actions/runs/45203748967) und Push-Workflow [#17](https://github.com/foxifox56/ha-inventory/actions/runs/45203730725). Beide liefen erfolgreich: Backend- und Frontendtests sowie Docker-Build und Smoke-Test für AMD64 und ARM64. Der lokale Docker-Smoke-Test war nicht verfügbar, da die Docker-CLI in dieser Entwicklungsumgebung nicht installiert ist.
 
 ## Manueller Ende-zu-Ende-Test auf einem iPhone
 
@@ -54,7 +54,7 @@ Dieser Test wurde in dieser Entwicklungsumgebung nicht ausgeführt. Er benötigt
 8. Offlinezugriff beziehungsweise einen Provider-Timeout testen. Fehlermeldung, „Erneut versuchen“ und manuelle Erfassung prüfen. Bei wiederholtem Scan eines gespeicherten Codes müssen immer dieselben Artikel-ID und Bestandswerte erscheinen.
 9. Bei laufender Kamera den Dialog schließen. Kameraindikator muss erlöschen. Ein Scan darf niemals Menge, Bestandsstatus oder Lagerort ändern.
 
-Für externe Produkterkennung braucht der App-Container eine Internetverbindung zu den Open-Facts-HTTPS-APIs. Die Kataloge sind freiwillig gepflegt; Treffer, Kategorien und Bilder können fehlen, veraltet, falsch oder durch upstream Rate-Limits zeitweise nicht verfügbar sein. In diesen Fällen werden Lookupfehler nicht gespeichert und kein Bestand verändert; der Nutzer kann begrenzt erneut versuchen oder manuell fortfahren. Automatisierte Tests verwenden ausschließlich Provider-Mocks, keinen Live-Open-Facts-Zugriff.
+Für externe Produkterkennung braucht der App-Container eine Internetverbindung zu den Open-Facts-HTTPS-APIs. Die Kataloge sind freiwillig gepflegt; Treffer, Kategorien und Bilder können fehlen, veraltet, falsch oder durch upstream Rate-Limits zeitweise nicht verfügbar sein. In diesen Fällen werden Lookupfehler nicht gespeichert und kein Bestand verändert; der Nutzer kann begrenzt erneut versuchen oder manuell fortfahren. Automatisierte Tests verwenden ausschließlich Provider-Mocks. Ein Live-Open-Facts-Test wurde in dieser Entwicklungsrunde **nicht durchgeführt**.
 
 ## Noch offene Hardware-/Supervisor-Checks
 
