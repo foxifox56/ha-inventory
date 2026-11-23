@@ -1,9 +1,13 @@
 name: Tests and container smoke
 
 on:
+  push:
+    branches:
+      - development/v0.2
   pull_request:
     branches:
       - main
+      - development/v0.1
 
 permissions:
   contents: read
@@ -41,6 +45,9 @@ jobs:
           node --check frontend/app.js
           node --check frontend/stock.mjs
           node --check frontend/barcode-lookup.mjs
+          node --check frontend/mobile-navigation.mjs
+          node --check frontend/zxing-scanner.mjs
+          node --check frontend/vendor/zxing-browser.mjs
 
       - name: Build and smoke-test AMD64 container
         run: bash scripts/container-smoke.sh

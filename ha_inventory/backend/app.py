@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from typing import Type
 
@@ -21,5 +22,7 @@ def create_handler(
     class ConfiguredInventoryHandler(InventoryRequestHandler):
         inventory = service
         require_ingress_proxy = ingress_ip_check
+        write_tokens: dict[str, float] = {}
+        write_tokens_lock = threading.Lock()
 
     return ConfiguredInventoryHandler

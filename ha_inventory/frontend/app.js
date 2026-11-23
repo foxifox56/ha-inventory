@@ -1,7 +1,10 @@
 import { isLowStock, simpleStockStatus, stockDetail, stockLabel, trackingModeLabel } from './stock.mjs';
 import { lookupBarcodeValue } from './barcode-lookup.mjs';
+import { groupByLocation, filterItems, MOBILE_VIEWS } from './mobile-navigation.mjs';
+import { startZXingScanner } from './zxing-scanner.mjs';
+import { BrowserMultiFormatReader } from './vendor/zxing-browser.mjs';
 
-const API = new URL('api/', document.baseURI).toString();
+const API = new URL('api/v1/', document.baseURI).toString();
 const $ = (selector) => document.querySelector(selector);
 const itemDialog = $('#item-dialog');
 const detailDialog = $('#detail-dialog');
@@ -9,17 +12,37 @@ const scanDialog = $('#scan-dialog');
 const form = $('#item-form');
 let items = [];
 let activeCategory = '';
+let activeLocation = '';
+let activeView = 'home';
+let scanReturnView = 'home';
 let toastTimeout;
-let cameraStream;
-let scanFrame;
+let scannerControls;
 let scannerBusy = false;
 let activeDetailItem;
+let writeToken = '';
 
-async function api(path, options = {}) {
+async function acquireWriteSession() {
+  const response = await fetch(new URL('write-session', API), { cache: 'no-store' });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || !body.write_token) throw new Error(body.error || 'Schreibsitzung konnte nicht geöffnet werden.');
+  writeToken = body.write_token;
+}
+
+async function api(path, options = {}, refreshedWriteSession = false) {
+  const method = (options.method || 'GET').toUpperCase();
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && !writeToken) await acquireWriteSession();
   const response = await fetch(new URL(path, API), {
     ...options,
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(method !== 'GET' && writeToken ? { 'X-HA-Inventory-Write-Token': writeToken } : {}),
+      ...(options.headers || {}),
+    },
   });
+  if (response.status === 403 && !refreshedWriteSession && !['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+    await acquireWriteSession();
+    return api(path, options, true);
+  }
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
     const error = new Error(body.error || 'Die Anfrage ist fehlgeschlagen.');
@@ -53,7 +76,17 @@ function render() {
   $('#stat-items').textContent = items.length;
   $('#stat-low').textContent = items.filter(isLowStock).length;
   $('#stat-locations').textContent = new Set(items.map((item) => item.location.trim()).filter(Boolean)).size;
+  renderLocations();
   renderFilters();
+}
+
+function renderLocations() {
+  const groups = groupByLocation(items);
+  $('#location-list').innerHTML = groups.map((group) => `<button class="location-card" type="button" data-location="${escapeHtml(group.location)}">
+    <span class="location-name"><span aria-hidden="true">⌖</span><span>${escapeHtml(group.location)}</span></span>
+    <span class="location-count">${group.count} ${group.count === 1 ? 'Artikel' : 'Artikel'} ›</span>
+  </button>`).join('');
+  $('#locations-empty').hidden = groups.length !== 0;
 }
 
 function renderFilters() {
@@ -64,11 +97,10 @@ function renderFilters() {
     `<button class="filter-chip ${activeCategory === '' ? 'active' : ''}" data-category="" type="button">Alle</button>`,
     ...categories.map((category) => `<button class="filter-chip ${activeCategory === category ? 'active' : ''}" data-category="${escapeHtml(category)}" type="button">${escapeHtml(category)}</button>`),
   ].join('');
-  const query = $('#search-input').value.trim().toLocaleLowerCase('de');
-  const filtered = items.filter((item) => {
-    const categoryMatch = !activeCategory || item.category === activeCategory;
-    const text = `${item.name} ${item.barcode || ''} ${item.location}`.toLocaleLowerCase('de');
-    return categoryMatch && (!query || text.includes(query));
+  const filtered = filterItems(items, {
+    query: $('#search-input').value,
+    category: activeCategory,
+    location: activeLocation,
   });
   const list = $('#item-list');
   list.innerHTML = filtered.map((item) => renderItem(item)).join('');
@@ -81,6 +113,11 @@ function renderFilters() {
   $('#result-count').textContent = items.length === 0
     ? 'Noch keine Artikel erfasst'
     : `${filtered.length} von ${items.length} Artikeln angezeigt`;
+  const activeLocationLabel = $('#active-location');
+  activeLocationLabel.hidden = !activeLocation;
+  activeLocationLabel.innerHTML = activeLocation
+    ? `${activeLocation === 'Ohne Lagerort' ? 'Ohne Lagerort' : `Lagerort: ${escapeHtml(activeLocation)}`} <button class="clear-location" type="button" data-clear-location>Alle Lagerorte</button>`
+    : '';
 }
 
 function renderItem(item) {
@@ -96,7 +133,7 @@ function renderItem(item) {
     </div>
     <span class="item-category">${escapeHtml(item.category)}</span>
     <span class="item-quantity ${isLow || isEmpty ? 'low-stock' : ''}">${escapeHtml(stockLabel(item))}${isLow ? ' · knapp' : ''}</span>
-    <span class="item-location">${item.location ? `<span class="location-value">⌖ ${escapeHtml(item.location)}</span>` : '<span class="location-value">–</span>'}</span>
+    <span class="item-location">${item.location ? `<span class="location-value">⌖ ${escapeHtml(item.location)}</span>` : '<span class="location-value">Ohne Lagerort</span>'}</span>
     <div class="row-actions">
       <button class="icon-button view-item" type="button" data-id="${item.id}" aria-label="${escapeHtml(item.name)} ansehen">◉</button>
       <button class="icon-button edit-item" type="button" data-id="${item.id}" aria-label="${escapeHtml(item.name)} bearbeiten">✎</button>
@@ -179,13 +216,14 @@ function openDetailItem(item) {
 }
 
 function closeScanDialog() {
-  scanDialog.close();
+  if (scanDialog.open) scanDialog.close();
   stopCamera();
+  setActiveTab(scanReturnView);
 }
 
 async function lookupBarcode(rawBarcode) {
   const result = await lookupBarcodeValue(rawBarcode, async (barcode) => {
-    const { item } = await api(`items/barcode/${encodeURIComponent(barcode)}`);
+    const { item } = await api(`items/by-barcode/${encodeURIComponent(barcode)}`);
     return item;
   }, {
     found: (item) => {
@@ -206,67 +244,101 @@ async function lookupBarcode(rawBarcode) {
 async function startCamera() {
   const status = $('#camera-status');
   const wrap = $('#camera-wrap');
-  if (!('BarcodeDetector' in window)) {
-    status.textContent = 'Dieser Browser unterstützt keinen Kamera-Barcode-Scan. Nutze die Eingabe unten.';
-    status.hidden = false;
-    return;
-  }
-  if (!navigator.mediaDevices?.getUserMedia) {
+  if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
     status.textContent = 'Die Kamera ist nur auf einer sicheren HTTPS-Seite verfügbar. Du kannst den Barcode unten eingeben.';
     status.hidden = false;
     return;
   }
+  $('#camera-button').disabled = true;
+  $('#camera-button').textContent = 'Kamera wird geöffnet …';
   try {
-    const supported = await window.BarcodeDetector.getSupportedFormats();
-    const formats = ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128'].filter((format) => supported.includes(format));
-    const detector = new window.BarcodeDetector({ formats: formats.length ? formats : supported });
-    cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
     const video = $('#camera-video');
-    video.srcObject = cameraStream;
-    await video.play();
     wrap.hidden = false;
     status.hidden = true;
     scannerBusy = false;
-    const detect = async () => {
-      if (!cameraStream || scannerBusy) return;
-      try {
-        const codes = await detector.detect(video);
-        if (codes.length && codes[0].rawValue) {
-          scannerBusy = true;
-          await lookupBarcode(codes[0].rawValue);
-          return;
-        }
-      } catch (_) {
-        // A frame may not be ready yet; continue scanning.
-      }
-      if (cameraStream) scanFrame = requestAnimationFrame(detect);
-    };
-    scanFrame = requestAnimationFrame(detect);
+    const reader = new BrowserMultiFormatReader();
+    scannerControls = await startZXingScanner(reader, video, (barcode) => {
+      if (scannerBusy) return;
+      scannerBusy = true;
+      void lookupBarcode(barcode);
+    }, (error) => {
+      status.textContent = error.name === 'NotAllowedError'
+        ? 'Kamerazugriff verweigert. Erlaube den Zugriff im Browser oder gib den Barcode ein.'
+        : 'Der Barcode konnte noch nicht gelesen werden. Richte die Kamera auf den Code.';
+      status.hidden = false;
+    });
+    if (!scanDialog.open) stopCamera();
   } catch (error) {
     status.textContent = error.name === 'NotAllowedError'
       ? 'Kamerazugriff verweigert. Erlaube den Zugriff im Browser oder gib den Barcode ein.'
       : 'Kamera konnte nicht geöffnet werden. Gib den Barcode unten ein.';
     status.hidden = false;
+  } finally {
+    $('#camera-button').disabled = false;
+    $('#camera-button').textContent = 'Kamera erneut öffnen';
   }
 }
 
 function stopCamera() {
-  if (scanFrame) cancelAnimationFrame(scanFrame);
-  scanFrame = undefined;
-  cameraStream?.getTracks().forEach((track) => track.stop());
-  cameraStream = undefined;
+  scannerControls?.stop();
+  scannerControls = undefined;
   scannerBusy = false;
-  $('#camera-video').srcObject = null;
+  const video = $('#camera-video');
+  video.pause();
+  video.srcObject = null;
   $('#camera-wrap').hidden = true;
+}
+
+function setView(view, { focusSearch = false } = {}) {
+  if (!MOBILE_VIEWS.includes(view)) return;
+  if (view === 'scanner') {
+    scanReturnView = activeView;
+    $('#scan-input').value = '';
+    $('#camera-status').hidden = true;
+    scanDialog.showModal();
+    setActiveTab('scanner');
+    setTimeout(() => $('#camera-button').hidden ? $('#scan-input').focus() : $('#camera-button').focus(), 60);
+    return;
+  }
+  if (view === 'home') {
+    activeLocation = '';
+    activeCategory = '';
+    $('#search-input').value = '';
+  }
+  activeView = view;
+  document.querySelector('main').dataset.mobileView = view;
+  setActiveTab(view);
+  if (focusSearch || view === 'search') setTimeout(() => $('#search-input').focus(), 80);
+  renderFilters();
+}
+
+function setActiveTab(view) {
+  document.querySelectorAll('.nav-tab').forEach((tab) => {
+    const active = tab.dataset.view === view;
+    tab.classList.toggle('is-active', active);
+    if (active) tab.setAttribute('aria-current', 'page');
+    else tab.removeAttribute('aria-current');
+  });
 }
 
 $('#add-button').addEventListener('click', () => openNewItem());
 $('#empty-add-button').addEventListener('click', () => openNewItem());
-$('#scan-button').addEventListener('click', () => {
-  $('#scan-input').value = '';
-  $('#camera-status').hidden = true;
-  scanDialog.showModal();
-  $('#scan-input').focus();
+$('#scan-button').addEventListener('click', () => setView('scanner'));
+document.querySelector('.mobile-nav').addEventListener('click', (event) => {
+  const tab = event.target.closest('[data-view]');
+  if (tab) setView(tab.dataset.view);
+});
+$('#location-list').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-location]');
+  if (!button) return;
+  activeLocation = button.dataset.location;
+  if (window.matchMedia('(max-width: 759px)').matches) setView('search');
+  else renderFilters();
+});
+$('#active-location').addEventListener('click', (event) => {
+  if (!event.target.closest('[data-clear-location]')) return;
+  activeLocation = '';
+  renderFilters();
 });
 $('#close-item-dialog').addEventListener('click', () => itemDialog.close());
 $('#cancel-item').addEventListener('click', () => itemDialog.close());
@@ -354,6 +426,7 @@ form.addEventListener('submit', async (event) => {
 });
 
 scanDialog.addEventListener('close', stopCamera);
+scanDialog.addEventListener('close', () => setActiveTab(scanReturnView));
 document.addEventListener('keydown', (event) => {
   if (event.key === '/' && !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) {
     event.preventDefault();
@@ -362,8 +435,9 @@ document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && scanDialog.open) stopCamera();
 });
 
-if ('BarcodeDetector' in window && window.isSecureContext && navigator.mediaDevices?.getUserMedia) {
+if (window.isSecureContext && navigator.mediaDevices?.getUserMedia) {
   $('#camera-button').hidden = false;
 }
 
+acquireWriteSession().catch((error) => showToast(`Schreibzugriff: ${error.message}`));
 loadItems();

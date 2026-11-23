@@ -29,7 +29,13 @@ class InventoryRepository:
     def _as_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
         return dict(row) if row is not None else None
 
-    def list_items(self, search: str = "", category: str = "") -> list[dict[str, Any]]:
+    def list_items(
+        self,
+        search: str = "",
+        category: str = "",
+        location: str = "",
+        stock_status: str = "",
+    ) -> list[dict[str, Any]]:
         clauses: list[str] = []
         params: list[Any] = []
         if search:
@@ -39,6 +45,12 @@ class InventoryRepository:
         if category:
             clauses.append("category = ? COLLATE NOCASE")
             params.append(category)
+        if location:
+            clauses.append("location = ? COLLATE NOCASE")
+            params.append(location)
+        if stock_status:
+            clauses.append("stock_status = ?")
+            params.append(stock_status)
         where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
         connection = self.database.connect()
         try:

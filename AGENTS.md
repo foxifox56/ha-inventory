@@ -3,18 +3,23 @@
 ## Architecture
 
 - `ha_inventory/backend/inventory/` owns inventory rules and persistence. Keep HTTP concerns out of this package.
-- `ha_inventory/backend/web/` translates HTTP requests into service calls and serves the static frontend.
-- `ha_inventory/frontend/` is a browser-only client. It talks to the backend through `/api`; it never reads or writes the database directly.
-- `ha_inventory/backend/database.py` owns schema initialization and migrations. Persist app data only in the Home Assistant `/data` mount.
-- Home Assistant packaging stays in `ha_inventory/config.yaml` and `ha_inventory/Dockerfile`. Do not require privileged mode, host networking, or access to the Home Assistant configuration directory.
+- `ha_inventory/backend/web/` adapts HTTP to the service and serves static files. The canonical API contract is versioned under `/api/v1`; document compatibility and breaking changes in `docs/API.md`.
+- `ha_inventory/frontend/` is a browser-only API client. It must never read or write SQLite directly. Keep navigation, scanner lifecycle, and stock presentation in small focused modules.
+- The REST API is independent of the UI. Other applications use its documented endpoints and durable item IDs, never the database file.
+- `ha_inventory/backend/database.py` owns schema initialization and migrations. Persist app data only in the Home Assistant `/data` mount and preserve existing article IDs/data during migrations.
+- A future Home Assistant integration belongs under `custom_components/ha_inventory/`; it must be an API client, not a second persistence layer. No integration may receive a browser-visible `SUPERVISOR_TOKEN`.
+- Home Assistant packaging stays in `ha_inventory/config.yaml` and `ha_inventory/Dockerfile`. Do not require privileged mode, host networking, Home Assistant config-directory access, or an exposed host port.
 
-## Product rules
+## Product and security rules
 
-- A barcode identifies an inventory item. Scanning it may open an existing item or start a new item form.
-- Scanning must never decrement, increment, or otherwise change stock automatically.
-- Stock changes happen only after a user explicitly saves an item edit.
-- Represent presence-only, estimated inventory, and exact manual counts as distinct tracking modes. A missing count must remain explicitly unknown, never be represented as zero or one.
-- Keep product lookup and other remote integrations optional. The app must remain usable on the local network without a cloud account.
+- Home Assistant Ingress is the authentication boundary. Accept app requests only from the Supervisor proxy (`172.30.32.2`). Do not add external routes, CORS access, or ports that bypass Ingress.
+- Reads remain read-only. Mutations require the additional short-lived write session as well as Ingress. The write session is not an external API credential or a replacement for Home Assistant authorization.
+- A barcode identifies an inventory item but does not define its identity. Preserve the durable database ID if a barcode is changed or removed.
+- Scanning must never decrement, increment, or otherwise change stock automatically. Known barcodes open item details; unknown ones start a new item form.
+- Stock changes happen only after a user explicitly saves an item edit. Shopping/to-do completion and future HA events must never alter inventory silently.
+- Represent presence-only, estimated inventory, and exact manual counts as distinct tracking modes. A missing count remains explicitly unknown, never zero or one.
+- Keep product lookup and other remote integrations optional. The app must remain usable without a cloud database or cloud product account.
+- Before enabling a future external client, define least-privilege authentication, revocation, and session handling. Never use direct SQLite access to avoid this work.
 
 ## Development guidelines
 
@@ -22,9 +27,19 @@
 - Use parameterized SQL, validate all API input, and escape user-provided values before rendering HTML.
 - Preserve leading zeroes in barcodes and treat barcodes as strings.
 - Add a database migration when changing the schema; do not edit existing migrations.
-- Use the Python standard library unless an additional dependency has a clear user-facing benefit.
-- Keep the UI usable on phone-sized screens and provide manual barcode entry when camera scanning is unavailable.
-- Add or update backend `unittest` and frontend Node test coverage for behavior changes. From `ha_inventory/`, run `python3 -m unittest discover -s backend/tests -v` and `node --test frontend/tests/*.test.mjs` before submitting.
-- Update the README and `TESTING.md` when setup, behavior, or verification changes.
+- Use the Python standard library unless an additional dependency has a clear user-facing benefit. Vendor browser dependencies locally, pin the version, and include license notices.
+- Keep the UI mobile-first, retain a usable desktop layout, provide manual barcode entry, honor reduced motion, and support system Dark Mode.
+- A PWA manifest, service worker, standalone metadata, or alternate iPhone auth flow may only be added after `docs/PWA-architecture.md`'s security questions are resolved and documented.
+- Keep shopping-list operations explicit and idempotent. Check for duplicates before writing, and never change inventory when a to-do item is completed.
+- Add/update backend `unittest` and frontend Node test coverage for behavior changes. From `ha_inventory/`, run:
+
+  ```bash
+  python3 -m unittest discover -s backend/tests -v
+  node --test frontend/tests/*.test.mjs
+  python3 -m compileall -q backend
+  node --check frontend/app.js
+  ```
+
+- Update `README.md`, `TESTING.md`, `docs/API.md`, and architecture notes when setup, API behavior, security, or verification changes.
 - Never install or configure this app on the user's production Home Assistant during development. Use local tests or an isolated test environment.
-- Work on a development branch and leave integration into `main` for review.
+- Work on a development branch and leave integration into `main` for review. Do not configure auto-merge.

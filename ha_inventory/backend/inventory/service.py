@@ -131,8 +131,19 @@ class InventoryService:
             "quantity": quantity,
         }
 
-    def list_items(self, search: str = "", category: str = "") -> list[dict[str, Any]]:
-        return self.repository.list_items(search=search.strip(), category=category.strip())
+    def list_items(
+        self,
+        search: str = "",
+        category: str = "",
+        location: str = "",
+        stock_status: str = "",
+    ) -> list[dict[str, Any]]:
+        return self.repository.list_items(
+            search=search.strip(),
+            category=category.strip(),
+            location=location.strip(),
+            stock_status=stock_status.strip(),
+        )
 
     def get(self, item_id: int) -> dict[str, Any]:
         item = self.repository.get(item_id)

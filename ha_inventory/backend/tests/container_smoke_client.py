@@ -10,13 +10,19 @@ from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 
-def request(base_url: str, path: str, method: str = "GET", body: dict | None = None):
+def request(
+    base_url: str,
+    path: str,
+    method: str = "GET",
+    body: dict | None = None,
+    headers: dict[str, str] | None = None,
+):
     data = json.dumps(body).encode("utf-8") if body is not None else None
     req = Request(
         f"{base_url}{path}",
         data=data,
         method=method,
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", **(headers or {})},
     )
     try:
         with urlopen(req, timeout=3) as response:
@@ -34,7 +40,7 @@ def main() -> None:
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
             try:
-                status, body, _ = request(base_url, "/api/health")
+                status, body, _ = request(base_url, "/api/v1/health")
                 if status == 200 and json.loads(body)["status"] == "ok":
                     return
             except (URLError, TimeoutError, json.JSONDecodeError):
@@ -50,9 +56,12 @@ def main() -> None:
         return
 
     if command == "create":
+        status, session_body, _ = request(base_url, "/api/v1/write-session")
+        assert status == 200, f"Unable to get write session: HTTP {status}: {session_body!r}"
+        token = json.loads(session_body)["write_token"]
         status, body, _ = request(
             base_url,
-            "/api/items",
+            "/api/v1/items",
             "POST",
             {
                 "name": "Container smoke item",
@@ -61,13 +70,14 @@ def main() -> None:
                 "quantity": 5,
                 "stock_status": "known",
             },
+            {"X-HA-Inventory-Write-Token": token},
         )
         assert status == 201, f"Unexpected create HTTP status: {status}: {body!r}"
         return
 
     if command == "read":
         status, body, _ = request(
-            base_url, f"/api/items/barcode/{quote('CI-SMOKE-001')}"
+            base_url, f"/api/v1/items/by-barcode/{quote('CI-SMOKE-001')}"
         )
         assert status == 200, f"Unexpected lookup HTTP status: {status}: {body!r}"
         item = json.loads(body)["item"]
@@ -77,7 +87,7 @@ def main() -> None:
         return
 
     if command == "denied":
-        status, body, _ = request(base_url, "/api/health")
+        status, body, _ = request(base_url, "/api/v1/health")
         assert status == 403, f"Expected ingress rejection, got HTTP {status}"
         assert "Ingress" in json.loads(body)["error"]
         return

@@ -1,30 +1,49 @@
 # Testprotokoll
 
-Dieses Protokoll hält die lokalen Prüfungen sowie die isolierten GitHub-Actions-Läufe fest.
+Dieses Protokoll unterscheidet automatisierte lokale Prüfungen, isolierte Container-Prüfungen und nicht ausgeführte Hardware-/Supervisor-Tests.
 
-## Version 0.1 — zweite Review-Korrektur
+## Version 0.2 – lokale Prüfung
 
-| Prüfung | Ergebnis |
+| Prüfung | Ergebnis am 23.11.2026 |
 | --- | --- |
-| Python-Unit-, Migrations- und HTTP-Integrationstests | Bestanden: 19 Tests |
-| Frontend-Tests mit `node --test` | Bestanden: 7 Tests, einschließlich Wechsel von numerischem Bestand zu einfachem Vorrat |
-| Python-Syntaxprüfung (`compileall`) | Bestanden |
-| JavaScript-Syntaxprüfung (`node --check`) | Bestanden |
-| Home-Assistant-YAML (`repository.yaml`, `ha_inventory/config.yaml`) | Bestanden; `backup: cold` und Architekturen `aarch64`/`amd64` geprüft |
-| Lokaler HA-App-Installationspfad | Gegen aktuelle Entwicklerdoku geprüft: Samba-Freigabe `local_apps`, Terminalpfad `/local_apps` |
-| SQLite nach HTTP-Server-Neustart | Bestanden: angelegte Menge und Status bleiben erhalten |
-| Ingress-Proxy-Regel | Bestanden: Proxy-IP erlaubt, direkte LAN-Anfrage abgewiesen |
-| GitHub Actions: Tests und Syntaxprüfungen | Bestanden: [Workflow-Lauf #3](https://github.com/foxifox56/ha-inventory/actions/runs/45170104746) |
-| Isolierter Docker-Smoke-Test (`linux/amd64` und `linux/arm64`) | Bestanden: Build, Start, Ingress-HTTP und `/data`-Persistenz nach Container-Neustart im [Workflow-Lauf #3](https://github.com/foxifox56/ha-inventory/actions/runs/45170104746) |
-| Docker-CLI in der lokalen Entwicklungsumgebung | Nicht verfügbar; der Container-Smoke-Test lief deshalb auf GitHub Actions |
-| Echter Supervisor-Ingress- und HA-OS-Test | Nicht ausgeführt: kein isolierter Home-Assistant-Host verfügbar; keine Installation auf dem produktiven Pi vorgenommen |
+| Backend-Unit-, Migrations- und HTTP-Integrationstests | Bestanden: 22 Tests |
+| Frontend-Tests mit Node.js | Bestanden: 12 Tests; Navigation, Lagerort-Filter, ZXing-Scanner-Lifecycle, Barcode-Routing und unveränderter Bestand |
+| Python-Syntax (`compileall`) | Bestanden |
+| JavaScript-Syntax (`node --check`) | Bestanden für Frontend-App, Module und ZXing-Bundle |
+| YAML-Parsing (`config.yaml`, `repository.yaml`) | Bestanden |
+| REST API v1 | Durch HTTP-Tests geprüft: Artikel, Kategorien, Lagerorte, Bestandsstatus, Filter, Versionsheader und Schreibsitzung |
+| Schreibschutz | Bestanden: GET ohne Token; POST/PATCH/DELETE mit Schreibsitzung; Mutation ohne Sitzung mit HTTP 403 abgewiesen |
+| Artikel-IDs | Bestanden: unabhängig vom Barcode, bei Barcode-Änderung erhalten und nach Löschen nicht wiederverwendet |
+| Bestand nach Barcode-Lookup | Bestanden: ein Scan-Lookup ändert Menge und Status nicht |
+| Ingress-Grenze | Bestanden: Test lässt nur `172.30.32.2` zu und weist direkte Anfragen ab |
+| Abhängigkeit ZXing | Lokal gebündelt; keine Laufzeit-CDN-Abfrage |
+| Docker-Smoke-Test lokal | Nicht ausführbar: Docker-CLI ist in dieser Entwicklungsumgebung nicht installiert |
+| Echte iPhone-/Safari-Kamera | Nicht getestet; Scanner-Decoder, Rückkamera-Constraint und Stop-Verhalten sind mit Node-Mocks getestet |
+| Home Assistant Supervisor / Raspberry Pi 4 | Nicht getestet; es gab keine Installation auf dem produktiven Pi |
+| PWA auf iOS / Nabu Casa | Nicht getestet und nicht implementiert; offene Punkte stehen in `docs/PWA-architecture.md` |
 
-Der Docker-Smoke-Test lief am 23.11.2026 auf einem isolierten GitHub Actions Runner für AMD64 und ARM64 (QEMU-Emulation). Er weist den Test-Client der erlaubten Proxy-IP `172.30.32.2` zu, prüft damit HTTP/API-Zugriff, weist eine andere Quell-IP ab und liest denselben Artikel nach Entfernen und Neuerstellen des App-Containers aus dem gemounteten `/data`-Verzeichnis aus. Der ARM64-Lauf prüft den für Raspberry Pi 4 erforderlichen Image- und Laufzeitpfad, ersetzt aber keinen Test auf einem tatsächlichen Pi oder Home-Assistant-Supervisor. Zusätzlich bestätigt der lokale HTTP-Test die SQLite-Daten nach einem Server-Neustart.
+Ausgeführt aus `ha_inventory/`:
 
-Die Installationsanleitung wurde mit der [offiziellen Anleitung zum Testen lokaler Apps](https://developers.home-assistant.io/docs/apps/testing/) und dem [Tutorial für die erste App](https://developers.home-assistant.io/docs/apps/first-app/) abgeglichen. Diese nennen den Ordner `local_apps` in der Samba-Freigabe und den Terminalpfad `/local_apps`. Die Home-Assistant-Konfigurationsreferenz beschreibt `addons` als veralteten Alias für den Container-Mount, nicht als aktuellen Zielordner der lokalen App.
+```bash
+python3 -m unittest discover -s backend/tests -v
+node --test frontend/tests/*.test.mjs
+python3 -m compileall -q backend
+node --check frontend/app.js
+node --check frontend/mobile-navigation.mjs
+node --check frontend/zxing-scanner.mjs
+node --check frontend/vendor/zxing-browser.mjs
+```
 
-`backup: cold` stoppt die App laut [Home-Assistant-Konfigurationsreferenz](https://developers.home-assistant.io/docs/apps/configuration/) für die Dauer der Sicherung. Die Web-Oberfläche ist dann kurz nicht verfügbar; das stoppt laufende Datenbank-Schreibvorgänge, bevor SQLite und WAL-Dateien gesichert werden.
+## Container-Smoke-Test
 
-Home Assistant OS unterstützt Raspberry Pi 4 mit der 64-Bit-Variante (`rpi4-64`/`aarch64`), nicht mit `armv7`. Diese Plattformvoraussetzung wurde mit der [offiziellen Raspberry-Pi-Installationsanleitung](https://www.home-assistant.io/installation/raspberrypi/) und der [Architekturübersicht](https://www.home-assistant.io/more-info/unsupported/system_architecture/) abgeglichen.
+`scripts/container-smoke.sh` baut das App-Image, prüft den Start, die Ingress-Quell-IP, die versionierte API, die Schreibsitzung und `/data`-Persistenz nach Entfernen und Neuerstellen des Containers. GitHub Actions führt ihn mit Docker Buildx für `linux/amd64` und `linux/arm64` aus. Da der lokale Docker-Client fehlt, wird das Ergebnis dieses PR-Laufs ergänzt, sobald GitHub Actions abgeschlossen ist.
 
-Die produktive Home-Assistant-Instanz und der Raspberry Pi wurden nicht verändert.
+Der ARM64-Build prüft den Image- und Laufzeitpfad für einen Raspberry Pi 4 mit Home Assistant OS 64-bit (`rpi4-64`/`aarch64`); er ersetzt keinen echten Supervisor-/Pi-Test. Die 32-Bit-Architektur `armv7` wird nicht angeboten. Siehe die offizielle [Raspberry-Pi-Installationsanleitung](https://www.home-assistant.io/installation/raspberrypi/) und die [HA-Systemarchitekturübersicht](https://www.home-assistant.io/more-info/unsupported/system_architecture/).
+
+## Verifizierte HA-Pfade und Sicherung
+
+Die lokale App-Installationsanleitung nennt `local_apps` in der Samba-Freigabe und `/local_apps` im Terminal; ältere `/addons`-Angaben können einen veralteten Alias oder Container-Mount bezeichnen. Siehe Home Assistant [Testing local apps](https://developers.home-assistant.io/docs/apps/testing/) und [App-Konfiguration](https://developers.home-assistant.io/docs/apps/configuration/).
+
+`backup: cold` stoppt den Container während der Sicherung und lässt ihn danach wieder starten, sofern er zuvor lief. Die Web-Oberfläche ist währenddessen kurz nicht erreichbar. Dadurch wird SQLite zusammen mit seinen WAL-Dateien aus dem gestoppten Datenverzeichnis statt neben laufenden Schreibvorgängen gesichert.
+
+Die API und Web-Oberfläche bleiben auf Home Assistant Ingress begrenzt. Kein zusätzlicher Host-Port wurde eingerichtet. Weder die produktive Home-Assistant-Instanz noch der Raspberry Pi wurden verändert; die Änderungen werden separat zur Review vorgelegt und nicht automatisch nach `main` übernommen.
