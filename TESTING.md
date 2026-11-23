@@ -1,30 +1,65 @@
 # Testprotokoll
 
-Dieses Protokoll hält die lokalen Prüfungen sowie die isolierten GitHub-Actions-Läufe fest.
+Stand: 23.11.2026, Branch `development/v0.2`. Automatisierte Prüfungen verwenden ausschließlich temporäre SQLite-Datenbanken und gemockte Provider-Antworten. Es werden keine Produktdaten von Open Facts während Tests angefragt.
 
-## Version 0.1 — zweite Review-Korrektur
+## Automatisierte Prüfungen
 
-| Prüfung | Ergebnis |
+| Prüfung | Umfang |
 | --- | --- |
-| Python-Unit-, Migrations- und HTTP-Integrationstests | Bestanden: 19 Tests |
-| Frontend-Tests mit `node --test` | Bestanden: 7 Tests, einschließlich Wechsel von numerischem Bestand zu einfachem Vorrat |
-| Python-Syntaxprüfung (`compileall`) | Bestanden |
-| JavaScript-Syntaxprüfung (`node --check`) | Bestanden |
-| Home-Assistant-YAML (`repository.yaml`, `ha_inventory/config.yaml`) | Bestanden; `backup: cold` und Architekturen `aarch64`/`amd64` geprüft |
-| Lokaler HA-App-Installationspfad | Gegen aktuelle Entwicklerdoku geprüft: Samba-Freigabe `local_apps`, Terminalpfad `/local_apps` |
-| SQLite nach HTTP-Server-Neustart | Bestanden: angelegte Menge und Status bleiben erhalten |
-| Ingress-Proxy-Regel | Bestanden: Proxy-IP erlaubt, direkte LAN-Anfrage abgewiesen |
-| GitHub Actions: Tests und Syntaxprüfungen | Bestanden: [Workflow-Lauf #3](https://github.com/foxifox56/ha-inventory/actions/runs/45170104746) |
-| Isolierter Docker-Smoke-Test (`linux/amd64` und `linux/arm64`) | Bestanden: Build, Start, Ingress-HTTP und `/data`-Persistenz nach Container-Neustart im [Workflow-Lauf #3](https://github.com/foxifox56/ha-inventory/actions/runs/45170104746) |
-| Docker-CLI in der lokalen Entwicklungsumgebung | Nicht verfügbar; der Container-Smoke-Test lief deshalb auf GitHub Actions |
-| Echter Supervisor-Ingress- und HA-OS-Test | Nicht ausgeführt: kein isolierter Home-Assistant-Host verfügbar; keine Installation auf dem produktiven Pi vorgenommen |
+| Backend-Unit-, Migrations- und HTTP-Tests | API v1, Ingress, lokale Treffer, Anbieter-Fallback, Metadatenvalidierung, Fehler, Schreibschutz und Datenbankpersistenz |
+| Provider-Tests | vier Open-Facts-Produktarten, benutzerdefinierter Folgeprovider, optionale Felder/Bilder, führende Nullen, alphanumerische lokale Codes, ungültige JSON-/HTTP-Antworten, Timeouts, Retry-After, Cache und Redirect-Allowlist |
+| Frontend-Tests | numerische und alphanumerische Codes, Formularvorschläge, mehrere Rate-Limit-Retries, abbrechbare Wartezeit, manuelle Alternative und Bestandsschutz |
+| API-Client-Tests | abgelaufenes Token genau einmal erneuern; `403` von Ingress nicht als Tokenablauf behandeln; keine endlose Wiederholung |
+| Migrationstests | v1-Altbestand und v3-Bestand: IDs, Barcodes, Notizen und bestätigte Mengen bleiben bei der additiven v4-Migration erhalten |
+| Python/JavaScript-Syntax | `compileall` sowie `node --check` für App und Laufzeitmodule |
+| Lokale Ergebniszahlen | 43 Backendtests und 25 Frontendtests bestanden; YAML von App, Repository und Actions geparst |
+| Docker lokal | Nicht ausführbar: Docker-CLI ist in dieser Umgebung nicht installiert |
+| Docker-Smoke-Tests | Containerstart, Ingress/API, Schreibsitzung und persistente `/data`-Daten auf AMD64 und ARM64 (GitHub Actions) |
 
-Der Docker-Smoke-Test lief am 23.11.2026 auf einem isolierten GitHub Actions Runner für AMD64 und ARM64 (QEMU-Emulation). Er weist den Test-Client der erlaubten Proxy-IP `172.30.32.2` zu, prüft damit HTTP/API-Zugriff, weist eine andere Quell-IP ab und liest denselben Artikel nach Entfernen und Neuerstellen des App-Containers aus dem gemounteten `/data`-Verzeichnis aus. Der ARM64-Lauf prüft den für Raspberry Pi 4 erforderlichen Image- und Laufzeitpfad, ersetzt aber keinen Test auf einem tatsächlichen Pi oder Home-Assistant-Supervisor. Zusätzlich bestätigt der lokale HTTP-Test die SQLite-Daten nach einem Server-Neustart.
+Aus `ha_inventory/` ausführen:
 
-Die Installationsanleitung wurde mit der [offiziellen Anleitung zum Testen lokaler Apps](https://developers.home-assistant.io/docs/apps/testing/) und dem [Tutorial für die erste App](https://developers.home-assistant.io/docs/apps/first-app/) abgeglichen. Diese nennen den Ordner `local_apps` in der Samba-Freigabe und den Terminalpfad `/local_apps`. Die Home-Assistant-Konfigurationsreferenz beschreibt `addons` als veralteten Alias für den Container-Mount, nicht als aktuellen Zielordner der lokalen App.
+```bash
+python3 -m unittest discover -s backend/tests -v
+node --test frontend/tests/*.test.mjs
+python3 -m compileall -q backend
+node --check frontend/app.js
+node --check frontend/api-client.mjs
+node --check frontend/product-prefill.mjs
+node --check frontend/barcode-lookup.mjs
+node --check frontend/mobile-navigation.mjs
+node --check frontend/zxing-scanner.mjs
+node --check frontend/vendor/zxing-browser.mjs
+```
 
-`backup: cold` stoppt die App laut [Home-Assistant-Konfigurationsreferenz](https://developers.home-assistant.io/docs/apps/configuration/) für die Dauer der Sicherung. Die Web-Oberfläche ist dann kurz nicht verfügbar; das stoppt laufende Datenbank-Schreibvorgänge, bevor SQLite und WAL-Dateien gesichert werden.
+Der Docker-Smoke-Test wird aus dem Repository-Root gestartet:
 
-Home Assistant OS unterstützt Raspberry Pi 4 mit der 64-Bit-Variante (`rpi4-64`/`aarch64`), nicht mit `armv7`. Diese Plattformvoraussetzung wurde mit der [offiziellen Raspberry-Pi-Installationsanleitung](https://www.home-assistant.io/installation/raspberrypi/) und der [Architekturübersicht](https://www.home-assistant.io/more-info/unsupported/system_architecture/) abgeglichen.
+```bash
+bash scripts/container-smoke.sh
+INVENTORY_SMOKE_PLATFORM=linux/arm64 bash scripts/container-smoke.sh
+```
 
-Die produktive Home-Assistant-Instanz und der Raspberry Pi wurden nicht verändert.
+Der aktuelle Review-Korrekturstand bestand im PR-Workflow [#20](https://github.com/foxifox56/ha-inventory/actions/runs/45204403049) und Push-Workflow [#19](https://github.com/foxifox56/ha-inventory/actions/runs/45204386926). Beide liefen erfolgreich: Backend- und Frontendtests sowie Docker-Build und Smoke-Test für AMD64 und ARM64. Der lokale Docker-Smoke-Test war nicht verfügbar, da die Docker-CLI in dieser Entwicklungsumgebung nicht installiert ist.
+
+## Manueller Ende-zu-Ende-Test auf einem iPhone
+
+Dieser Test wurde in dieser Entwicklungsumgebung nicht ausgeführt. Er benötigt ein iPhone, eine separat eingerichtete Home-Assistant-Testinstanz und Zugriff über HTTPS. Er kann im Heim-WLAN über die HTTPS-URL von Home Assistant oder außerhalb des Hauses über die Nabu Casa Remote URL erfolgen. Beide Wege müssen HA-Login und den App-Ingress-Kontext verwenden; nicht direkt auf Add-on-IP oder -Port zugreifen.
+
+1. In der Home-Assistant-App auf dem iPhone anmelden. Im Heim-WLAN die lokale HTTPS-URL oder außerhalb des Hauses die Nabu Casa Remote URL öffnen. Danach HA Inventory über **Einstellungen → Apps → HA Inventory → Öffnen** aufrufen. Nicht über Add-on-IP, Port oder eine direkte App-URL starten.
+2. Scanner antippen und Kamerazugriff erteilen. Rückkamera prüfen. Safari beziehungsweise der Home-Assistant-In-App-Browser muss HTTPS, Anmeldung und Ingress-Sitzung beibehalten.
+3. Einen bereits gespeicherten numerischen Artikelcode und einen alphanumerischen Code wie `TOOL-001` scannen. Beide müssen denselben vorhandenen Datensatz öffnen. Menge, Status und Lagerort vorher/nachher vergleichen.
+4. Einen unbekannten alphanumerischen Code scannen und anschließend manuell eingeben. Beide Male muss die manuelle Artikelerfassung mit unverändertem Code öffnen, ohne Open Facts aufzurufen.
+5. Einen bekannten Open-Facts-Testbarcode scannen, der lokal nicht existiert. Ladeanzeige prüfen; falls erkannt, Name, Marke, Packungsgröße, Kategorie, Bild, Quelle und Bildlizenz prüfen. Felder editieren und Lagerort/Bestandsmodell wählen. Vor „Artikel speichern“ darf kein Datensatz in der Lagerübersicht erscheinen.
+6. Drei unterschiedliche, lokal unbekannte numerische Barcodes direkt nacheinander scannen. Bei Rate-Limit muss eine verständliche Warteanzeige mit automatischem begrenztem Retry erscheinen. Währenddessen „Manuell erfassen“ antippen: Warte-Retry muss abbrechen und das Formular sofort mit dem Barcode öffnen.
+7. Formular abbrechen, denselben Barcode erneut scannen und prüfen, dass kein Artikel angelegt wurde. Danach bewusst einmal speichern; genau ein Datensatz muss erscheinen. Doppeltippen auf Speichern darf keine zweite Anlage erzeugen.
+8. Offlinezugriff beziehungsweise einen Provider-Timeout testen. Fehlermeldung, „Erneut versuchen“ und manuelle Erfassung prüfen. Bei wiederholtem Scan eines gespeicherten Codes müssen immer dieselben Artikel-ID und Bestandswerte erscheinen.
+9. Bei laufender Kamera den Dialog schließen. Kameraindikator muss erlöschen. Ein Scan darf niemals Menge, Bestandsstatus oder Lagerort ändern.
+
+Für externe Produkterkennung braucht der App-Container eine Internetverbindung zu den Open-Facts-HTTPS-APIs. Die Kataloge sind freiwillig gepflegt; Treffer, Kategorien und Bilder können fehlen, veraltet, falsch oder durch upstream Rate-Limits zeitweise nicht verfügbar sein. In diesen Fällen werden Lookupfehler nicht gespeichert und kein Bestand verändert; der Nutzer kann begrenzt erneut versuchen oder manuell fortfahren. Automatisierte Tests verwenden ausschließlich Provider-Mocks. Ein Live-Open-Facts-Test wurde in dieser Entwicklungsrunde **nicht durchgeführt**.
+
+## Noch offene Hardware-/Supervisor-Checks
+
+- iPhone-Kamera und iOS-/Ingress-/Nabu-Casa-Verhalten: manuell nach obiger Liste offen; automatisierte ZXing-Tests verwenden Kamera-Mocks.
+- Home Assistant OS auf Raspberry Pi 4 `rpi4-64` / `aarch64`: ARM64 Docker-Build und Smoke-Test sind nur ein CI-Nachweis, kein Supervisor- oder Pi-Test.
+- Supervisor-Backup/Restore beim Wechsel zwischen Repository-URLs/Branches mit unterschiedlicher App-ID: nicht auf Hardware ausgeführt. Vollständiges HA-Backup vor einem Upgrade erstellen; Branch-Wechsel kann ein separates `/data`-Verzeichnis bedeuten.
+- PWA, Offline-Betrieb der App und eigenständiger Homescreen-Zugang: nicht implementiert. Produktsuche funktioniert offline nicht, aber manuelle Artikelerfassung bleibt verfügbar.
+- Produktions-Home-Assistant und Raspberry Pi: nicht verändert; es wurde keine Installation vorgenommen.

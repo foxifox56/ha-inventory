@@ -2,8 +2,9 @@
 <html lang="de">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#f5f7f8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#f4f5f8" />
+    <meta name="color-scheme" content="light dark" />
     <title>HA Inventory</title>
     <base href="./" />
     <link rel="stylesheet" href="styles.css" />
@@ -11,23 +12,23 @@
   <body>
     <div class="shell">
       <header class="topbar">
-        <a class="brand" href="./" aria-label="HA Inventory Startseite">
+        <a class="brand" href="./" aria-label="HA Inventory Startseite" data-home-link>
           <span class="brand-mark" aria-hidden="true">▦</span>
           <span>ha<span class="brand-light">inventory</span></span>
         </a>
-        <span class="local-pill"><span></span> Lokal gespeichert</span>
+        <span class="local-pill"><span></span> Zuhause gespeichert</span>
       </header>
 
-      <main>
+      <main data-mobile-view="home">
         <section class="hero">
           <div>
-            <p class="eyebrow">DEIN ZUHAUSE. DEIN ÜBERBLICK.</p>
+            <p class="eyebrow">DEIN LAGER AUF EINEN BLICK</p>
             <h1>Was haben wir noch da?</h1>
-            <p class="hero-copy">Finde es schnell heraus. Ganz ohne jeden Griff mitzuzählen.</p>
+            <p class="hero-copy">Finde Artikel und Bestände schnell wieder.</p>
           </div>
           <div class="hero-actions">
-            <button class="button button-quiet" id="scan-button" type="button">
-              <span aria-hidden="true">▤</span> Barcode suchen
+            <button class="button button-quiet desktop-scan-button" id="scan-button" type="button">
+              <span aria-hidden="true">▤</span> Barcode scannen
             </button>
             <button class="button button-primary" id="add-button" type="button">
               <span aria-hidden="true">＋</span> Artikel anlegen
@@ -50,10 +51,18 @@
           </article>
         </section>
 
+        <section class="locations-panel" id="locations-panel" aria-labelledby="locations-heading">
+          <div class="panel-heading">
+            <div><h2 id="locations-heading">Lagerorte</h2><p>Wähle einen Ort, um seine Artikel zu sehen.</p></div>
+          </div>
+          <div class="location-list" id="location-list"></div>
+          <div class="location-empty" id="locations-empty" hidden>Noch keine Lagerorte erfasst.</div>
+        </section>
+
         <section class="inventory-panel">
           <div class="panel-heading">
             <div>
-              <h2>Dein Bestand</h2>
+              <h2 id="inventory-heading">Dein Bestand</h2>
               <p id="result-count">Noch keine Artikel erfasst</p>
             </div>
             <label class="search-box">
@@ -62,6 +71,7 @@
               <kbd>/</kbd>
             </label>
           </div>
+          <p class="active-location" id="active-location" hidden></p>
           <nav class="filters" id="category-filters" aria-label="Kategorien"></nav>
           <div class="item-list" id="item-list" aria-live="polite"></div>
           <div class="empty-state" id="empty-state" hidden>
@@ -71,28 +81,57 @@
             <button class="button button-primary" id="empty-add-button" type="button">Ersten Artikel anlegen</button>
           </div>
         </section>
-        <p class="quiet-note"><span>✳</span> Dein Bestand ändert sich nur, wenn du ihn selbst anpasst.</p>
+        <p class="quiet-note"><span>✳</span> Scannen zeigt Artikel. Bestand änderst nur du beim Speichern.</p>
       </main>
-      <footer>HA Inventory <span>·</span> Version 0.1 <span>·</span> Deine Daten bleiben bei dir</footer>
+
+      <nav class="mobile-nav" aria-label="Hauptnavigation">
+        <button class="nav-tab is-active" type="button" data-view="home" aria-current="page">
+          <span class="nav-icon" aria-hidden="true">⌂</span><span>Start</span>
+        </button>
+        <button class="nav-tab" type="button" data-view="search">
+          <span class="nav-icon" aria-hidden="true">⌕</span><span>Suche</span>
+        </button>
+        <button class="nav-tab nav-scan" type="button" data-view="scanner">
+          <span class="nav-icon" aria-hidden="true">▤</span><span>Scanner</span>
+        </button>
+        <button class="nav-tab" type="button" data-view="locations">
+          <span class="nav-icon" aria-hidden="true">⌖</span><span>Lagerorte</span>
+        </button>
+      </nav>
+
+      <footer>HA Inventory <span>·</span> Version 0.2 <span>·</span> Deine Daten bleiben bei dir</footer>
     </div>
 
     <dialog id="item-dialog" class="dialog">
       <form id="item-form" method="dialog">
         <div class="dialog-heading">
-          <div>
-            <p class="eyebrow">ARTIKELVERWALTUNG</p>
-            <h2 id="form-title">Neuer Artikel</h2>
-          </div>
+          <div><p class="eyebrow">ARTIKELVERWALTUNG</p><h2 id="form-title">Neuer Artikel</h2></div>
           <button class="icon-button" id="close-item-dialog" type="button" aria-label="Schließen">×</button>
         </div>
         <input id="item-id" type="hidden" />
+        <input id="item-data-source" type="hidden" />
+        <input id="item-source-url" type="hidden" />
+        <input id="item-image-license" type="hidden" />
+        <div id="product-attribution" class="product-attribution full-field" hidden>
+          <img id="product-preview" alt="Produktabbildung" hidden />
+          <span>Vorschlag von <a id="product-source-link" target="_blank" rel="noopener noreferrer"></a> · Daten bitte prüfen</span>
+        </div>
         <label class="field full-field">Artikelname <span>*</span>
           <input id="item-name" name="name" required maxlength="160" placeholder="z. B. Olivenöl" />
         </label>
         <label class="field full-field">Barcode <span class="optional">optional</span>
-          <input id="item-barcode" name="barcode" maxlength="64" inputmode="numeric" placeholder="Code eintippen oder scannen" />
+          <input id="item-barcode" name="barcode" maxlength="64" inputmode="text" autocapitalize="off" spellcheck="false" placeholder="Code eintippen oder scannen" />
         </label>
         <div class="form-grid">
+          <label class="field">Marke <span class="optional">optional</span>
+            <input id="item-brand" name="brand" maxlength="120" placeholder="Marke" />
+          </label>
+          <label class="field">Packungsgröße <span class="optional">optional</span>
+            <input id="item-product-size" name="product_size" maxlength="80" placeholder="z. B. 500 ml" />
+          </label>
+          <label class="field full-field">Bild-URL <span class="optional">optional · Open-Facts-Bildquellen</span>
+            <input id="item-image-url" name="image_url" type="url" maxlength="2048" placeholder="HTTPS-Bildadresse" />
+          </label>
           <label class="field">Kategorie
             <input id="item-category" name="category" list="category-options" maxlength="80" placeholder="Sonstiges" />
             <datalist id="category-options">
@@ -150,10 +189,14 @@
         <div><dt>Kategorie</dt><dd id="detail-category"></dd></div>
         <div><dt>Lagerort</dt><dd id="detail-location"></dd></div>
         <div><dt>Barcode</dt><dd id="detail-barcode"></dd></div>
+        <div><dt>Marke</dt><dd id="detail-brand"></dd></div>
+        <div><dt>Packungsgröße</dt><dd id="detail-product-size"></dd></div>
       </dl>
-      <div class="detail-note" id="detail-notes-wrap" hidden>
-        <span>Notiz</span><p id="detail-notes"></p>
+      <div id="detail-product-media" class="product-attribution" hidden>
+        <img id="detail-product-image" alt="Produktabbildung" hidden />
+        <span>Produktdaten: <a id="detail-product-source" target="_blank" rel="noopener noreferrer"></a></span>
       </div>
+      <div class="detail-note" id="detail-notes-wrap" hidden><span>Notiz</span><p id="detail-notes"></p></div>
       <p class="detail-footnote">Der Scan hat den Bestand nicht verändert.</p>
       <div class="dialog-actions">
         <button class="button button-quiet" id="close-detail-button" type="button">Schließen</button>
@@ -166,21 +209,22 @@
         <div><p class="eyebrow">SCHNELLER ZUGRIFF</p><h2>Barcode scannen</h2></div>
         <button class="icon-button" id="close-scan-dialog" type="button" aria-label="Schließen">×</button>
       </div>
-      <p class="scan-copy">Ein bekannter Code öffnet die Artikeldetails; ein neuer Code startet die Erfassung. Ein Scan verändert nie den Bestand.</p>
-      <p class="camera-limitation">Kamera-Scan in Version 0.1 experimentell: Er hängt von der Browser-API ab und ist auf iPhone/Safari nicht verlässlich verfügbar. Manuelle Eingabe funktioniert immer.</p>
+      <p class="scan-copy">Ein bekannter Code öffnet den Artikel. Bei unbekannten Codes suchen wir passende Produktdaten und füllen das Formular vor. Nichts wird ohne „Artikel speichern“ angelegt oder am Bestand verändert.</p>
+      <p class="camera-limitation">Die Kamera nutzt ZXing im Browser und benötigt eine sichere HTTPS-Verbindung. iOS/Safari-Kameraerkennung hängt von iOS-Version, Berechtigungen und Browserkontext ab. Manuelle Eingabe bleibt verfügbar.</p>
       <div class="camera-wrap" id="camera-wrap" hidden>
         <video id="camera-video" playsinline muted></video>
         <span class="scan-frame" aria-hidden="true"></span>
       </div>
-      <p class="camera-status" id="camera-status" hidden></p>
-      <button class="button button-quiet camera-button" id="camera-button" type="button" hidden>▣ Kamera testen (Beta)</button>
+      <p class="camera-status" id="camera-status" role="status" aria-live="polite" aria-atomic="true" hidden></p>
+      <button class="button button-quiet camera-button" id="camera-button" type="button" hidden>Kamera öffnen</button>
       <label class="field full-field scan-field">Barcode eingeben oder Scanner verwenden
         <div class="scan-input-row">
-          <input id="scan-input" autocomplete="off" inputmode="numeric" placeholder="Barcode …" />
+          <input id="scan-input" autocomplete="off" inputmode="text" autocapitalize="off" spellcheck="false" placeholder="Barcode oder Artikelcode …" />
           <button class="button button-primary" id="lookup-button" type="button">Suchen</button>
         </div>
       </label>
-      <p class="scan-hint">Tipp: Ein Bluetooth- oder USB-Scanner funktioniert wie eine Tastatur. Bestätige danach mit Enter.</p>
+      <button class="button button-quiet full-field" id="manual-entry-button" type="button" hidden>Manuell erfassen</button>
+      <p class="scan-hint">Ein Bluetooth- oder USB-Scanner funktioniert wie eine Tastatur. Bestätige danach mit Enter.</p>
     </dialog>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>

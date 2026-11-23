@@ -6,7 +6,7 @@ import sqlite3
 from pathlib import Path
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 class Database:
@@ -134,6 +134,35 @@ class Database:
                         "VALUES (3, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))"
                     )
                 current = 3
+
+            if current < 4:
+                with connection:
+                    # Product enrichment is metadata only. Add nullable-looking
+                    # text fields with empty defaults so every v0.1/v0.2 row,
+                    # barcode, stock value, and durable ID remains untouched.
+                    connection.execute(
+                        "ALTER TABLE inventory_items ADD COLUMN brand TEXT NOT NULL DEFAULT ''"
+                    )
+                    connection.execute(
+                        "ALTER TABLE inventory_items ADD COLUMN product_size TEXT NOT NULL DEFAULT ''"
+                    )
+                    connection.execute(
+                        "ALTER TABLE inventory_items ADD COLUMN image_url TEXT NOT NULL DEFAULT ''"
+                    )
+                    connection.execute(
+                        "ALTER TABLE inventory_items ADD COLUMN image_license TEXT NOT NULL DEFAULT ''"
+                    )
+                    connection.execute(
+                        "ALTER TABLE inventory_items ADD COLUMN data_source TEXT NOT NULL DEFAULT ''"
+                    )
+                    connection.execute(
+                        "ALTER TABLE inventory_items ADD COLUMN source_url TEXT NOT NULL DEFAULT ''"
+                    )
+                    connection.execute(
+                        "INSERT INTO schema_migrations(version, applied_at) "
+                        "VALUES (4, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))"
+                    )
+                current = 4
 
             if current != SCHEMA_VERSION:
                 raise RuntimeError(
