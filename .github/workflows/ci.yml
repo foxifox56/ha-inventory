@@ -11,7 +11,7 @@ permissions:
 jobs:
   tests-and-container:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -26,6 +26,12 @@ jobs:
         with:
           node-version: "22"
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Run backend and frontend tests
         working-directory: ha_inventory
         run: |
@@ -36,5 +42,10 @@ jobs:
           node --check frontend/stock.mjs
           node --check frontend/barcode-lookup.mjs
 
-      - name: Build and smoke-test the container
+      - name: Build and smoke-test AMD64 container
+        run: bash scripts/container-smoke.sh
+
+      - name: Build and smoke-test Raspberry Pi 4 ARM64 container
+        env:
+          INVENTORY_SMOKE_PLATFORM: linux/arm64
         run: bash scripts/container-smoke.sh

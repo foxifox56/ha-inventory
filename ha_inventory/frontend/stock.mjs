@@ -10,6 +10,10 @@ export function trackingModeLabel(mode) {
   }[mode] || 'Einfacher Vorrat';
 }
 
+export function simpleStockStatus(status) {
+  return ['unknown', 'present', 'out_of_stock'].includes(status) ? status : 'unknown';
+}
+
 export function stockLabel(item) {
   if (item.tracking_mode === 'simple') {
     return {

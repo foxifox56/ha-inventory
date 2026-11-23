@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isLowStock, stockDetail, stockLabel, trackingModeLabel } from '../stock.mjs';
+import { isLowStock, simpleStockStatus, stockDetail, stockLabel, trackingModeLabel } from '../stock.mjs';
 import { lookupBarcodeValue } from '../barcode-lookup.mjs';
 
 test('simple stock distinguishes unknown, present, and empty', () => {
@@ -8,6 +8,12 @@ test('simple stock distinguishes unknown, present, and empty', () => {
   assert.equal(stockLabel({ ...base, stock_status: 'unknown' }), 'Bestand unbekannt');
   assert.equal(stockLabel({ ...base, stock_status: 'present' }), 'Vorhanden');
   assert.equal(stockLabel({ ...base, stock_status: 'out_of_stock' }), 'Nicht vorhanden');
+});
+
+test('switching a numeric item to simple mode selects a valid unknown status', () => {
+  assert.equal(simpleStockStatus('known'), 'unknown');
+  assert.equal(simpleStockStatus(''), 'unknown');
+  assert.equal(simpleStockStatus('present'), 'present');
 });
 
 test('estimated and exact quantities are labelled differently', () => {

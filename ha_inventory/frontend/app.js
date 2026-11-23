@@ -1,4 +1,4 @@
-import { isLowStock, stockDetail, stockLabel, trackingModeLabel } from './stock.mjs';
+import { isLowStock, simpleStockStatus, stockDetail, stockLabel, trackingModeLabel } from './stock.mjs';
 import { lookupBarcodeValue } from './barcode-lookup.mjs';
 
 const API = new URL('api/', document.baseURI).toString();
@@ -144,7 +144,7 @@ function openEditItem(item) {
   $('#item-category').value = item.category;
   $('#item-location').value = item.location;
   $('#item-tracking-mode').value = item.tracking_mode;
-  $('#item-stock-status').value = item.stock_status;
+  $('#item-stock-status').value = simpleStockStatus(item.stock_status);
   $('#item-quantity').value = item.quantity ?? '';
   $('#item-unit').value = item.unit;
   $('#item-minimum').value = item.minimum_quantity;
@@ -160,6 +160,7 @@ function syncTrackingFields() {
   $('#simple-stock-field').hidden = !simple;
   $('#numeric-stock-fields').hidden = simple;
   if (simple) {
+    $('#item-stock-status').value = simpleStockStatus($('#item-stock-status').value);
     $('#item-quantity').value = '';
   }
 }

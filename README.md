@@ -18,20 +18,25 @@ Eine lokale, universelle Lagerverwaltung als Home-Assistant-App. Version 0.1 bie
 
 ## Installation auf Home Assistant OS
 
-Die App-Struktur ist für Home Assistant OS auf einem Raspberry Pi 4 vorbereitet. Der Home-Assistant-Supervisor baut das Image aus der `Dockerfile` auf dem Gerät; der erste Build kann einige Minuten dauern. Die Datenbank liegt dauerhaft im App-Datenverzeichnis und wird vom Home-Assistant-Backup erfasst.
+Die App unterstützt Home Assistant OS auf einem Raspberry Pi 4 mit **64-Bit-HA OS** (`aarch64`). Verwende dafür die offizielle `rpi4-64`-Variante; 32-Bit-`armv7` ist nicht enthalten. Der Supervisor baut das Image aus der `Dockerfile` auf dem Gerät; der erste Build kann einige Minuten dauern. Die ARM64-Docker-Build- und Laufprüfung ist Teil von GitHub Actions. Die Datenbank liegt dauerhaft im App-Datenverzeichnis und wird vom Home-Assistant-Backup erfasst.
 
 **Wichtig:** Das GitHub-Repository ist derzeit privat. Home Assistant kann es nicht einfach über die normale Repository-URL aus dem App Store beziehen. Für einen Test nach der Überprüfung muss der App-Ordner lokal bereitgestellt werden. Ich habe die App nicht auf deinem produktiven Home Assistant installiert.
 
 ### Lokaler Test nach der Überprüfung
 
-1. Kopiere den Inhalt von `ha_inventory/` in den `local_apps/ha_inventory/`-Ordner von Home Assistant OS.
-2. Öffne **Einstellungen → Apps → App installieren** und aktualisiere die App-Liste.
-3. Wähle unter **Local apps** die **HA Inventory** aus und installiere sie.
-4. Starte die App und öffne die Web-Oberfläche.
+1. Lade die geprüfte Branch als ZIP herunter und entpacke sie.
+2. Öffne auf Home Assistant OS die Samba-Freigabe **`local_apps`** oder im Terminal-&-SSH-Add-on den Pfad **`/local_apps`**.
+3. Lege dort **`ha_inventory`** an und kopiere den Inhalt des gleichnamigen Projektordners hinein. Danach muss zum Beispiel `local_apps/ha_inventory/config.yaml` direkt vorhanden sein.
+4. Öffne in Home Assistant **Einstellungen → Apps**, wähle im Menü **Nach Updates suchen** und aktualisiere die Ansicht.
+5. Installiere **HA Inventory** aus dem Bereich **Local apps**, starte die App und öffne ihre Web-Oberfläche.
 
-Der `local_apps`-Ordner ist der Home-Assistant-Entwicklungsweg für lokal bereitgestellte Apps. Die aktuelle Branch kannst du in GitHub als ZIP herunterladen; kopiere dann nur den Inhalt des darin enthaltenen `ha_inventory/`-Ordners. Du erreichst `local_apps` beispielsweise über eine bereits installierte Samba-Share- oder Terminal-&-SSH-App. Diese Schritte verändern den Home Assistant; führe sie erst aus, wenn du die Version geprüft hast und einen Test dort möchtest.
+Das entspricht der aktuellen [Home-Assistant-Anleitung für lokale Apps](https://developers.home-assistant.io/docs/apps/testing/) und dem [Tutorial für die erste App](https://developers.home-assistant.io/docs/apps/first-app/). In älteren Konfigurationsbeispielen kann `addons` beziehungsweise `/addons` auftauchen; `addons` ist dort ein veralteter Alias für den `local_apps`-Mount und nicht der aktuelle Ordnername zum Bereitstellen der App. Diese Schritte verändern Home Assistant; führe sie erst aus, wenn du die Version geprüft hast und einen Test dort möchtest.
 
-Der App-Eintrag unterstützt Home Assistant OS auf Raspberry Pi 4 (`aarch64`) sowie `amd64`-Builds. `armv7` wurde entfernt, da Home Assistant diese Architektur als veraltet kennzeichnet. Für automatische Updates aus dem App Store müsste später ein öffentlich erreichbares Repository oder ein anderer für den Supervisor erreichbarer Git-Endpunkt eingerichtet werden.
+Der App-Eintrag unterstützt `aarch64` sowie `amd64`. Home Assistant OS unterstützt den Raspberry Pi 4 mit der 64-Bit-Variante; die 32-Bit-Architektur `armv7` ist bei Home Assistant nicht mehr unterstützt. Für automatische Updates aus dem App Store müsste später ein öffentlich erreichbares Repository oder ein anderer für den Supervisor erreichbarer Git-Endpunkt eingerichtet werden.
+
+### Datensicherung
+
+Die App verwendet `backup: cold`: Home Assistant stoppt den App-Container für die Dauer der Sicherung. Dadurch ist die Oberfläche währenddessen kurz nicht erreichbar; die Datenbank und ihre SQLite-WAL-Dateien werden aus dem gestoppten App-Datenverzeichnis gesichert. So wird vermieden, dass die Sicherung gleichzeitig mit laufenden Datenbank-Schreibvorgängen erfolgt.
 
 ### Barcode-Scan mit der Handykamera
 

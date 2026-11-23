@@ -8,6 +8,12 @@ image_name="ha-inventory:container-smoke"
 container_name="ha-inventory-container-smoke"
 network_name="ha-inventory-smoke"
 data_dir="$(mktemp -d)"
+platform="${INVENTORY_SMOKE_PLATFORM:-}"
+platform_args=()
+
+if [[ -n "$platform" ]]; then
+  platform_args+=(--platform "$platform")
+fi
 
 cleanup() {
   docker rm -f "$container_name" >/dev/null 2>&1 || true
@@ -16,11 +22,15 @@ cleanup() {
 }
 trap cleanup EXIT
 
-docker build --tag "$image_name" ha_inventory
+if [[ -n "$platform" ]]; then
+  docker buildx build "${platform_args[@]}" --load --tag "$image_name" ha_inventory
+else
+  docker build --tag "$image_name" ha_inventory
+fi
 docker network create --driver bridge --subnet 172.30.32.0/24 "$network_name" >/dev/null
 
 start_app() {
-  docker run --detach \
+  docker run "${platform_args[@]}" --detach \
     --name "$container_name" \
     --network "$network_name" \
     --ip 172.30.32.3 \
@@ -29,7 +39,7 @@ start_app() {
 }
 
 proxy_request() {
-  docker run --rm \
+  docker run "${platform_args[@]}" --rm \
     --network "$network_name" \
     --ip "$1" \
     --entrypoint python3 \
@@ -48,4 +58,4 @@ start_app >/dev/null
 proxy_request 172.30.32.2 wait
 proxy_request 172.30.32.2 read
 
-echo "Container build, startup, ingress, and /data persistence checks passed."
+echo "Container checks passed${platform:+ for $platform}: build, startup, ingress, and /data persistence."
