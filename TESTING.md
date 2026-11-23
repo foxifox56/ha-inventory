@@ -38,7 +38,7 @@ bash scripts/container-smoke.sh
 INVENTORY_SMOKE_PLATFORM=linux/arm64 bash scripts/container-smoke.sh
 ```
 
-Der aktuelle Review-Korrekturstand bestand im PR-Workflow [#18](https://github.com/foxifox56/ha-inventory/actions/runs/45203748967) und Push-Workflow [#17](https://github.com/foxifox56/ha-inventory/actions/runs/45203730725). Beide liefen erfolgreich: Backend- und Frontendtests sowie Docker-Build und Smoke-Test für AMD64 und ARM64. Der lokale Docker-Smoke-Test war nicht verfügbar, da die Docker-CLI in dieser Entwicklungsumgebung nicht installiert ist.
+Der aktuelle Review-Korrekturstand bestand im PR-Workflow [#20](https://github.com/foxifox56/ha-inventory/actions/runs/45204403049) und Push-Workflow [#19](https://github.com/foxifox56/ha-inventory/actions/runs/45204386926). Beide liefen erfolgreich: Backend- und Frontendtests sowie Docker-Build und Smoke-Test für AMD64 und ARM64. Der lokale Docker-Smoke-Test war nicht verfügbar, da die Docker-CLI in dieser Entwicklungsumgebung nicht installiert ist.
 
 ## Manueller Ende-zu-Ende-Test auf einem iPhone
 
