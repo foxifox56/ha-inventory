@@ -11,7 +11,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "ha_inventory"
 TEST = ROOT / "ha_inventory_test"
-INDEPENDENT = {"config.yaml", "DOCS.md", "README.md"}
+INDEPENDENT = {"config.yaml", "DOCS.md", "README.md", "Dockerfile"}
 
 
 def runtime_files(folder: Path) -> dict[str, Path]:
@@ -43,6 +43,19 @@ def test_config() -> str:
     return text
 
 
+def test_dockerfile() -> str:
+    original = (SOURCE / "Dockerfile").read_text(encoding="utf-8")
+    metadata = "\n".join((
+        'ARG BUILD_VERSION=0.4.0-test1',
+        'ARG BUILD_ARCH=amd64',
+        'LABEL io.hass.version="${BUILD_VERSION}" io.hass.type="app" io.hass.arch="${BUILD_ARCH}"',
+    ))
+    return original.replace(
+        "FROM python:3.12-alpine\n",
+        "FROM python:3.12-alpine\n\n" + metadata + "\n\n",
+        1,
+    )
+
 def check_or_sync(sync: bool) -> int:
     source = runtime_files(SOURCE)
     if sync:
@@ -55,6 +68,7 @@ def check_or_sync(sync: bool) -> int:
             if name not in source:
                 path.unlink()
         (TEST / "config.yaml").write_text(test_config(), encoding="utf-8")
+        (TEST / "Dockerfile").write_text(test_dockerfile(), encoding="utf-8")
     target = runtime_files(TEST)
     issues = []
     for name in sorted(source.keys() | target.keys()):
@@ -65,6 +79,9 @@ def check_or_sync(sync: bool) -> int:
     config = TEST / "config.yaml"
     if not config.is_file() or config.read_text(encoding="utf-8") != test_config():
         issues.append("Unsichere oder veraltete Test-Konfiguration")
+    dockerfile = TEST / "Dockerfile"
+    if not dockerfile.is_file() or dockerfile.read_text(encoding="utf-8") != test_dockerfile():
+        issues.append("Supervisor Dockerfile labels differ from test metadata")
     for doc in ("README.md", "DOCS.md"):
         if not (TEST / doc).is_file():
             issues.append(f"Test-Anleitung fehlt: {doc}")
@@ -73,7 +90,7 @@ def check_or_sync(sync: bool) -> int:
             print("ERROR:", issue, file=sys.stderr)
         print("Regenerieren: python scripts/sync-test-app.py --sync", file=sys.stderr)
         return 1
-    print(f"OK: {len(source)} Dateien identisch, Test-App-Slug/Boot getrennt")
+    print(f"OK: {len(source)} Laufzeit-/Testdateien identisch; Test-Slug, Boot und Image-Labels getrennt")
     return 0
 
 
