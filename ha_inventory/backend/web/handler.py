@@ -16,6 +16,7 @@ from ..errors import InventoryError
 from ..inventory.service import InventoryService
 from ..inventory.movements import StockMovementService
 from ..product_lookup.provider import ProductLookupError, ProductLookupRateLimited
+from ..receipt.image_processing import MAX_IMAGE_BYTES, SUPPORTED_MIME_TYPES
 
 
 FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
@@ -23,6 +24,7 @@ MAX_REQUEST_BYTES = 1_000_000
 INGRESS_PROXY_IP = "172.30.32.2"
 WRITE_SESSION_TTL_SECONDS = 3600
 API_VERSION = "1"
+MAX_RECEIPT_BYTES = MAX_IMAGE_BYTES
 STOCK_STATUSES = (
     {"value": "unknown", "label": "Unbekannt"},
     {"value": "present", "label": "Vorhanden"},
@@ -41,8 +43,9 @@ class InventoryRequestHandler(BaseHTTPRequestHandler):
     require_ingress_proxy = True
     write_tokens: dict[str, float] = {}
     write_tokens_lock = threading.Lock()
-    server_version = "HAInventory/0.3"
+    server_version = "HAInventory/0.4"
     stock_movements: StockMovementService
+    receipt_service: object
 
     def do_GET(self) -> None:
         if not self._allow_request():
@@ -57,6 +60,37 @@ class InventoryRequestHandler(BaseHTTPRequestHandler):
         if not self._allow_request():
             return
         path = urlsplit(self.path).path
+        if path == "/api/v1/receipts/recognize":
+            if not self._allow_write():
+                return
+            try:
+                image, content_type = self._read_receipt_image()
+                result = self.receipt_service.recognize(image, content_type)
+                self._json_response(200, result)
+            except InventoryError as error:
+                self._inventory_error(error)
+            return
+        receipt_parts = path.split("/")
+        receipt_mutation = (
+            len(receipt_parts) == 6
+            and receipt_parts[1:3] == ["api", "v1"]
+            and receipt_parts[3] == "receipts"
+            and receipt_parts[4]
+            and receipt_parts[5] in {"import", "undo"}
+        )
+        if receipt_mutation:
+            if not self._allow_write():
+                return
+            try:
+                payload = self._read_json()
+                if receipt_parts[5] == "import":
+                    result = self.receipt_service.import_receipt(receipt_parts[4], payload)
+                else:
+                    result = self.receipt_service.undo_receipt(receipt_parts[4], payload)
+                self._json_response(200 if result.get("replayed") else 201, result)
+            except InventoryError as error:
+                self._inventory_error(error)
+            return
         if path not in {"/api/items", "/api/v1/items"}:
             movement_parts = path.split("/")
             movement_route = (
@@ -145,6 +179,14 @@ class InventoryRequestHandler(BaseHTTPRequestHandler):
         if api_root == "/api/v1/" and api_path == "/write-session":
             self._issue_write_session()
             return
+        if api_root == "/api/v1/" and api_path.startswith("/receipts/"):
+            receipt_id = api_path[len("/receipts/"):]
+            if receipt_id and "/" not in receipt_id:
+                try:
+                    self._json_response(200, self.receipt_service.get_receipt(receipt_id))
+                except InventoryError as error:
+                    self._inventory_error(error)
+                return
         product_lookup_prefix = "/product-lookup/"
         if api_root == "/api/v1/" and api_path.startswith(product_lookup_prefix):
             barcode = unquote(api_path[len(product_lookup_prefix) :])
@@ -287,8 +329,32 @@ class InventoryRequestHandler(BaseHTTPRequestHandler):
             raise InventoryError("Die Anfrage muss ein JSON-Objekt enthalten.")
         return body
 
+    def _read_receipt_image(self) -> tuple[bytes, str]:
+        if self.headers.get("Transfer-Encoding"):
+            raise InventoryError("Chunked Bildübertragungen werden nicht unterstützt.", status_code=411, field="image")
+        raw_length = self.headers.get("Content-Length")
+        try:
+            length = int(raw_length) if raw_length is not None else -1
+        except ValueError:
+            raise InventoryError("Ungültige Content-Length.", field="image") from None
+        if length <= 0:
+            raise InventoryError("Die Bildgröße fehlt oder ist leer.", status_code=411, field="image")
+        if length > MAX_RECEIPT_BYTES:
+            raise InventoryError("Das Bild ist größer als 6 MiB. Bitte kleiner aufnehmen.", status_code=413, field="image")
+        content_type = self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+        if content_type not in SUPPORTED_MIME_TYPES:
+            raise InventoryError("Bitte ein JPEG- oder PNG-Bild verwenden.", field="image")
+        body = self.rfile.read(length)
+        if len(body) != length:
+            raise InventoryError("Die Bildübertragung wurde unterbrochen.", field="image")
+        return body, content_type
+
     def _inventory_error(self, error: InventoryError) -> None:
         body: dict[str, object] = {"error": error.message}
+        if error.code:
+            body["code"] = error.code
+        if error.details:
+            body["details"] = error.details
         if error.field:
             body["field"] = error.field
         self._json_response(error.status_code, body)

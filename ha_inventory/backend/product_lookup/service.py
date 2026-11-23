@@ -28,7 +28,9 @@ class ProductLookupService:
 
     def lookup(self, barcode: str) -> dict[str, Any]:
         if not isinstance(barcode, str):
-            raise InventoryError("Artikelcode muss Text mit 1 bis 64 Zeichen sein.", field="barcode")
+            raise InventoryError(
+                "Artikelcode muss Text mit 1 bis 64 Zeichen sein.", field="barcode"
+            )
         # Match InventoryService's barcode normalization. Item codes are stored
         # as text and may be numeric, alphanumeric, or contain punctuation.
         barcode = barcode.strip()

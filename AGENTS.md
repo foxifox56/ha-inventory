@@ -4,6 +4,7 @@
 
 - `ha_inventory/backend/inventory/` owns inventory rules and persistence. Keep HTTP concerns out of this package.
 - `ha_inventory/backend/product_lookup/` owns provider protocols, remote product parsing, source attribution, cache and network safety. It must call the local inventory first through the product lookup service and never persist a result.
+- `ha_inventory/backend/receipt/` owns image validation, local OCR adapter, receipt parser, local/learned product matching, privacy-safe fingerprints, atomic import, and bulk undo. The HTTP layer may enforce request size and content type, but receipt business rules and batch coordination stay here.
 - `ha_inventory/backend/web/` adapts HTTP to the service and serves static files. The canonical API contract is versioned under `/api/v1`; document compatibility and breaking changes in `docs/API.md`.
 - `ha_inventory/frontend/` is a browser-only API client. It must never read or write SQLite directly. Keep navigation, scanner lifecycle, and stock presentation in small focused modules.
 - The REST API is independent of the UI. Other applications use its documented endpoints and durable item IDs, never the database file.
@@ -19,6 +20,10 @@
 - Scan lookup must check SQLite first for any valid stored item code, numeric or alphanumeric. Only unknown numeric codes may go to Open Facts; unknown alphanumeric codes go directly to manual entry.
 - The scanner opens in read-only `Ansehen` mode. Only a deliberate switch to `Verbrauchen` may book the selected unit count on a known numeric item; `Einlagern` always requires a separate confirmation.
 - Product lookup results are suggestions only. An unknown barcode can prefill editable name, brand, pack size, category, and image fields, but only an explicit protected save may create an item. A lookup must never mutate stock.
+- Receipt OCR is local-only: Tesseract runs inside the app container with bounded time, one image worker, and `deu`/`eng` data. Accept only bounded JPEG/PNG uploads; never add cloud OCR or persist source images/full OCR transcripts. The browser may locally decode HEIC, crop, rotate, resize, and convert to JPEG, but it must keep a recovery message when the browser cannot decode a photo.
+- Receipt parsing is a user-reviewed suggestion. Merchant hints prioritize REWE and Kaufland, but parser output is never authoritative. Ignore known Pfand, return, discount, coupon, total, payment, and store lines; never parse a price as a count. Mark unpriced/uncertain quantities for review. A scan or OCR recognition alone must never create an article or mutate stock.
+- Receipt import requires explicit row decisions and one user confirmation. New articles, learned aliases, receipt status, and all stock movements must share a SQLite transaction. Route every stock update through `StockMovementService`; record `source=receipt`, receipt ID, and source line IDs. Use durable idempotency keys and recheck duplicate fingerprints inside the import transaction.
+- Bulk receipt undo must reverse every receipt movement inside one transaction or none. If any movement is unsafe after later activity, roll back the entire undo. Keep newly created articles after undo with their baseline reset to unknown; preserve the audit history and durable IDs.
 - External providers run only on the backend. Require HTTPS, a clear User-Agent, bounded timeouts/response bodies/cache, validated redirects and image/source URLs, and graceful provider failures. Respect provider rate limits without blocking a backend worker; expose retry guidance so the frontend can perform only bounded, cancellable waits and retain a manual fallback. Do not send locations, quantities, or other inventory data to a product provider. Keep provider-specific details out of the UI and SQLite layer.
 - Preserve source attribution and image licensing when external metadata is saved or shown. Treat external data as unverified user-contributed suggestions.
 - Stock changes use `StockMovementService`, a transaction, and a unique idempotency key. Never patch a quantity directly. Unknown/simple stock needs an explicit confirmed initialization; a confirmed zero is `known/0`, while receive and consume still require a positive whole count. Consumption may never make a quantity negative. Undo creates one audited counter-movement and cannot repeat; an initialization can only be undone when every later effective movement has itself been undone.
@@ -36,7 +41,7 @@
 - Use parameterized SQL, validate all API input, and escape user-provided values before rendering HTML.
 - Preserve leading zeroes in barcodes and treat barcodes as strings.
 - Add a database migration when changing the schema; do not edit existing migrations.
-- Migrations must preserve legacy item IDs, barcodes, notes, locations, confirmed stock values, product metadata, movement IDs, idempotency keys, and undo references. Migration v5 adds the movement ledger; v6 rebuilds only that ledger to permit a zero initialization and its inverse, without rewriting item rows or dropping journal history.
+- Migrations must preserve legacy item IDs, barcodes, notes, locations, confirmed stock values, product metadata, movement IDs, idempotency keys, and undo references. Migration v5 adds the movement ledger; v6 rebuilds only that ledger to permit a zero initialization and its inverse; v7 adds receipt metadata, learned aliases, and optional movement links. All migrations preserve item rows and existing journal history.
 - Use the Python standard library unless an additional dependency has a clear user-facing benefit. Vendor browser dependencies locally, pin the version, and include license notices.
 - Keep the UI mobile-first, retain a usable desktop layout, provide manual barcode entry, honor reduced motion, and support system Dark Mode.
 - A PWA manifest, service worker, standalone metadata, or alternate iPhone auth flow may only be added after `docs/PWA-architecture.md`'s security questions are resolved and documented.
@@ -46,11 +51,13 @@
   ```bash
   python3 -m unittest discover -s backend/tests -v
   node --test frontend/tests/*.test.mjs
+  python3 -m pip install -r requirements.txt
   python3 -m compileall -q backend
   node --check frontend/app.js
   ```
 
-- Product lookup tests must cover local-first behavior, all enabled provider types, missing fields/images, network/timeout/schema failures, leading-zero barcodes, cache/rate behavior, and proof that a lookup does not create or alter an item. Frontend tests must cover suggestions, manual fallback, loading, scanner mode routing, duplicate scan cooldown, booking quantity semantics, and undo affordances. Backend tests must cover idempotency, concurrent consumption, undo, movement history, negative stock protection, and migration v5/v6.
+- Product lookup tests must cover local-first behavior, all enabled provider types, missing fields/images, network/timeout/schema failures, leading-zero barcodes, cache/rate behavior, and proof that a lookup does not create or alter an item. Frontend tests must cover suggestions, manual fallback, loading, scanner mode routing, duplicate scan cooldown, booking quantity semantics, and undo affordances. Backend tests must cover idempotency, concurrent consumption, undo, movement history, negative stock protection, and migration v5/v6/v7.
+- Receipt tests must cover REWE/Kaufland/generic detection, price-vs-quantity parsing, missing/uncertain lines, aliases, duplicate warnings and overrides, local image validation, no writes during recognition, atomic import and bulk undo, idempotent lost-response retries, and v6→v7 preservation. AMD64 and ARM64 container checks must use a synthetic receipt and the actual local Tesseract executable with both German and English data; do not label these as iPhone or Pi hardware tests.
 
 - Update `README.md`, `TESTING.md`, `docs/API.md`, and architecture notes when setup, API behavior, security, or verification changes.
 - Never install or configure this app on the user's production Home Assistant during development. Use local tests or an isolated test environment.

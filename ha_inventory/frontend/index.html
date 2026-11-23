@@ -30,6 +30,9 @@
             <button class="button button-quiet desktop-scan-button" id="scan-button" type="button">
               <span aria-hidden="true">▤</span> Barcode scannen
             </button>
+            <button class="button button-quiet" id="receipt-open-button" type="button">
+              <span aria-hidden="true">▧</span> Kassenbon erfassen
+            </button>
             <button class="button button-primary" id="add-button" type="button">
               <span aria-hidden="true">＋</span> Artikel anlegen
             </button>
@@ -82,6 +85,53 @@
           </div>
         </section>
         <p class="quiet-note"><span>✳</span> Scannen zeigt Artikel. Bestand änderst nur du beim Speichern.</p>
+
+        <section class="receipt-panel" id="receipt-view" aria-labelledby="receipt-heading">
+          <div class="panel-heading receipt-heading">
+            <div><p class="eyebrow">LOKALE TEXTERKENNUNG</p><h2 id="receipt-heading">Kassenbon übernehmen</h2>
+              <p>Foto aufnehmen oder aus deiner Mediathek wählen. Das Bild wird auf diesem Gerät vorbereitet und nicht dauerhaft gespeichert.</p></div>
+          </div>
+          <div class="receipt-actions">
+            <label class="button button-primary receipt-file-button" for="receipt-camera-input">▧ Bon fotografieren</label>
+            <input class="visually-hidden" id="receipt-camera-input" type="file" accept="image/*" capture="environment" />
+            <label class="button button-quiet receipt-file-button" for="receipt-library-input">Foto auswählen</label>
+            <input class="visually-hidden" id="receipt-library-input" type="file" accept="image/*" />
+          </div>
+          <button class="button button-quiet receipt-manual-button" id="receipt-manual-item" type="button">Artikel manuell erfassen</button>
+          <div id="receipt-editor" class="receipt-editor" hidden>
+            <img id="receipt-photo-preview" alt="Vorschau des Kassenbonfotos" />
+            <div class="receipt-image-tools">
+              <button class="button button-quiet" id="receipt-rotate-left" type="button">↶ 90°</button>
+              <button class="button button-quiet" id="receipt-rotate-right" type="button">↷ 90°</button>
+              <span>Ränder beschneiden</span>
+            </div>
+            <div class="receipt-crop-grid" aria-label="Bonfoto zuschneiden">
+              <label>Oben <input type="range" data-crop="top" min="0" max="30" value="0" /></label>
+              <label>Rechts <input type="range" data-crop="right" min="0" max="30" value="0" /></label>
+              <label>Unten <input type="range" data-crop="bottom" min="0" max="30" value="0" /></label>
+              <label>Links <input type="range" data-crop="left" min="0" max="30" value="0" /></label>
+            </div>
+            <button class="button button-primary" id="receipt-recognize" type="button">Kassenbon lokal erkennen</button>
+          </div>
+          <p class="camera-status receipt-status" id="receipt-status" role="status" aria-live="polite" hidden></p>
+          <div id="receipt-results" class="receipt-results" hidden>
+            <div class="receipt-meta" id="receipt-meta"></div>
+            <div id="receipt-duplicate-warning" class="receipt-warning" role="alert" hidden></div>
+            <label id="receipt-duplicate-confirm-wrap" class="confirm-stock" hidden>
+              <input id="receipt-allow-duplicate" type="checkbox" /> Ich habe den möglichen Doppelimport geprüft und möchte den Bon trotzdem separat übernehmen.
+            </label>
+            <p class="receipt-privacy">Erkannt mit lokaler OCR (<span id="receipt-ocr-languages"></span>). Foto und vollständiger OCR-Text werden nicht in HA Inventory gespeichert. Prüfe Namen und Mengen vor dem Einlagern.</p>
+            <div class="receipt-lines-heading"><h3>Erkannte Positionen</h3><span id="receipt-line-count"></span></div>
+            <div id="receipt-lines" class="receipt-lines"></div>
+            <label class="confirm-stock receipt-confirm"><input id="receipt-confirm" type="checkbox" /> Ich habe die ausgewählten Artikel, Mengen und Lagerorte geprüft.</label>
+            <button class="button button-primary receipt-import-button" id="receipt-import-button" type="button" disabled>Ausgewählte Positionen einlagern</button>
+            <button class="button button-quiet receipt-clear-button" id="receipt-clear-button" type="button">Anderen Kassenbon erfassen</button>
+          </div>
+          <div id="receipt-import-result" class="receipt-import-result" hidden>
+            <strong id="receipt-import-message"></strong>
+            <button class="button button-quiet" id="receipt-undo-button" type="button" hidden>Gesamten Bon-Import rückgängig machen</button>
+          </div>
+        </section>
       </main>
 
       <nav class="mobile-nav" aria-label="Hauptnavigation">
@@ -97,9 +147,12 @@
         <button class="nav-tab" type="button" data-view="locations">
           <span class="nav-icon" aria-hidden="true">⌖</span><span>Lagerorte</span>
         </button>
+        <button class="nav-tab" type="button" data-view="receipts">
+          <span class="nav-icon" aria-hidden="true">▧</span><span>Bon</span>
+        </button>
       </nav>
 
-      <footer>HA Inventory <span>·</span> Version 0.3 <span>·</span> Deine Daten bleiben bei dir</footer>
+      <footer>HA Inventory <span>·</span> Version 0.4 <span>·</span> Deine Daten bleiben bei dir</footer>
     </div>
 
     <dialog id="item-dialog" class="dialog">

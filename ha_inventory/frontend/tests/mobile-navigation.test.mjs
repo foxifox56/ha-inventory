@@ -8,8 +8,8 @@ const items = [
   { id: 3, name: 'Lappen', barcode: '9', category: 'Haushalt', location: '' },
 ];
 
-test('mobile navigation exposes the four requested destinations', () => {
-  assert.deepEqual(MOBILE_VIEWS, ['home', 'search', 'scanner', 'locations']);
+test('mobile navigation exposes the requested destinations and receipt entry', () => {
+  assert.deepEqual(MOBILE_VIEWS, ['home', 'search', 'scanner', 'locations', 'receipts']);
 });
 
 test('location grouping sorts locations and keeps unassigned items visible', () => {

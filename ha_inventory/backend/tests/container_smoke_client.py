@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import io
+import subprocess
 import sys
 import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
+from PIL import Image, ImageDraw, ImageFont
 
 
 def request(
@@ -16,6 +19,7 @@ def request(
     method: str = "GET",
     body: dict | None = None,
     headers: dict[str, str] | None = None,
+    timeout: float = 3,
 ):
     data = json.dumps(body).encode("utf-8") if body is not None else None
     req = Request(
@@ -25,7 +29,19 @@ def request(
         headers={"Content-Type": "application/json", **(headers or {})},
     )
     try:
-        with urlopen(req, timeout=3) as response:
+        with urlopen(req, timeout=timeout) as response:
+            return response.status, response.read(), response.headers
+    except HTTPError as error:
+        return error.code, error.read(), error.headers
+
+
+def post_bytes(base_url: str, path: str, body: bytes, content_type: str, headers: dict[str, str], timeout: float = 30):
+    req = Request(
+        f"{base_url}{path}", data=body, method="POST",
+        headers={"Content-Type": content_type, **headers},
+    )
+    try:
+        with urlopen(req, timeout=timeout) as response:
             return response.status, response.read(), response.headers
     except HTTPError as error:
         return error.code, error.read(), error.headers
@@ -54,6 +70,41 @@ def main() -> None:
         assert "text/html" in headers.get("Content-Type", "")
         assert b"detail-dialog" in body
         assert b"Verbrauchen" in body and b"history-dialog" in body
+        assert b"Kassenbon" in body and b"receipt-ocr-languages" in body
+        return
+
+    if command == "receipt-ocr":
+        languages = subprocess.run(
+            ["tesseract", "--list-langs"], capture_output=True, text=True,
+            timeout=10, check=True,
+        ).stdout.splitlines()[1:]
+        assert "deu" in languages and "eng" in languages, f"Required Tesseract languages missing: {languages!r}"
+        image = Image.new("RGB", (1200, 500), "white")
+        draw = ImageDraw.Draw(image)
+        font = ImageFont.load_default(size=42)
+        for y, line in zip((35, 150, 265, 380), (
+            "REWE", "2 X MILCH 1,09 2,18", "BANANEN 1,29", "SUMME 3,47",
+        )):
+            draw.text((50, y), line, font=font, fill="black")
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+
+        status, body, _ = request(base_url, "/api/v1/write-session")
+        assert status == 200, f"Unable to get write session: HTTP {status}: {body!r}"
+        token = json.loads(body)["write_token"]
+        status, response, _ = post_bytes(
+            base_url, "/api/v1/receipts/recognize", buffer.getvalue(), "image/png",
+            {"X-HA-Inventory-Write-Token": token},
+        )
+        assert status == 200, f"Local receipt OCR failed: HTTP {status}: {response!r}"
+        result = json.loads(response)
+        assert result["merchant"] == "rewe", f"Merchant recognition failed: {result!r}"
+        milk = next((line for line in result["lines"] if "MILCH" in line["label"].upper()), None)
+        assert milk is not None, f"Tesseract did not read the receipt item: {result!r}"
+        assert milk["quantity"] == 2, f"Explicit multiplier was not recognized: {milk!r}"
+        assert result["ocr"]["languages"] == ["deu", "eng"]
+        status, inventory, _ = request(base_url, "/api/v1/items")
+        assert status == 200 and json.loads(inventory)["items"] == [], "OCR recognition must not create or change stock"
         return
 
     if command == "create":

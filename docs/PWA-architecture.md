@@ -20,12 +20,14 @@ Version 0.3 vendort `@zxing/browser` 0.2.1 lokal in der App, anstatt ein CDN zur
 
 Ein bekannter Barcode öffnet die Details. Bei unbekannten Codes versucht das Backend über ausgehendes HTTPS die Produktdatenquelle Open Facts und füllt danach das editierbare Artikelformular vor. Wenn die Quelle offline ist oder keinen Treffer hat, bleibt das normale Formular mit Barcode verfügbar. Scans führen weder eine Artikelerstellung noch eine Bestandsänderung aus.
 
-## In 0.2 umgesetzt
+## Tatsächlich umgesetzt
 
-- Mobile-first Web-Oberfläche mit Start-, Suche-, Scanner- und Lagerorte-Navigation, Kartenansicht, Touch-Zielen, Desktop-Layout und System-Dark-Mode.
+- Mobile-first Web-Oberfläche mit Start-, Suche-, Scanner-, Lagerorte- und Kassenbon-Navigation, Kartenansicht, Touch-Zielen, Desktop-Layout und System-Dark-Mode.
 - ZXing-Kamera-Decoder im Scanner-Dialog, sofern Browser, HTTPS-Kontext und Berechtigungen ihn erlauben; manuelle Eingabe ist immer verfügbar.
 - App bleibt hinter Home Assistant Ingress. Der Barcode-Scanner nutzt keine externe Laufzeit-CDN.
 - Backend-Produktsuche über den lokalen, ingress-geschützten API-Endpunkt; an Open Facts wird nur der Barcode gesendet. Bilder werden über den vertrauenswürdigen Facts-Bildhost geladen und nicht offline gecacht.
+- Version 0.4 ergänzt iPhone-Fotoaufnahme und Mediathek-Auswahl für Kassenbons. Das Foto wird im Browser gedreht, zugeschnitten und verkleinert. Die API bleibt hinter demselben HA-Ingress und derselben Schreibsitzung; es wird kein direkter Port oder zusätzlicher Authentifizierungspfad geöffnet.
+- OCR mit Tesseract `deu` + `eng` läuft lokal im HA-Inventory-App-Container. Fotos und OCR-Volltext werden nicht dauerhaft gespeichert. Import benötigt eine separate Benutzerprüfung und Bestätigung.
 
 ## Noch offen
 
@@ -34,6 +36,7 @@ Ein bekannter Barcode öffnet die Details. Bei unbekannten Codes versucht das Ba
 - Eine PWA innerhalb Ingress muss mit dem konkreten dynamischen Ingress-Pfad, Nabu Casa, Cookie-/Sitzungserneuerung, Logout und Service-Worker-Scope auf dem iPhone verifiziert werden.
 - Der ZXing-Code hat automatisierte Schnittstellentests; die Kamera wurde nicht auf einem echten iPhone getestet. Ein Kamera-Permission-/Decode-Test auf iOS bleibt offen.
 - Eine eigenständige HTTPS-PWA mit eigener Authentifizierung sowie externe API-Credentials werden nicht angeboten.
+- Fotoauswahl und OCR wurden nicht auf echtem iPhone/Safari geprüft. `capture="environment"`, Safari-HEIC-Decodierung und Zuschneiden sind daher auf einem realen iPhone weiterhin manuell zu verifizieren. Die Container-Smokes prüfen nur das echte lokale Tesseract in AMD64-/ARM64-Containern.
 
 ## Quellen
 

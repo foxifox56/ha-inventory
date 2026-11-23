@@ -1,12 +1,12 @@
 # HA Inventory
 
-HA Inventory ist eine lokale, modulare Lagerverwaltung für Home Assistant. Version 0.3 ergänzt den iPhone-optimierten Barcode-Workflow um bestätigtes Einlagern, bewusst aktivierbaren Verbrauch, einen dauerhaften Buchungsverlauf und Rückgängig-Buchungen. Die SQLite-Datenbank bleibt auf dem Home-Assistant-Gerät.
+HA Inventory ist eine lokale, modulare Lagerverwaltung für Home Assistant. Version 0.4 ergänzt den Barcode-Workflow um ein iPhone-taugliches Kassenbonfoto, lokale Tesseract-OCR und eine gemeinsam bestätigte, rückgängig machbare Übernahme. Die SQLite-Datenbank bleibt auf dem Home-Assistant-Gerät.
 
 **Standardmäßig ist der Scan-Modus „Ansehen“ und verändert nichts.** Ein bekannter numerischer oder alphanumerischer Artikelcode öffnet die vorhandenen Artikeldetails. Im ausdrücklich ausgewählten Modus „Verbrauchen“ bucht ein Scan die gewählte Packungsanzahl (Standard: eine Packung) für einen Artikel mit bekanntem Zahlenbestand. „Einlagern“ verlangt immer eine Bestätigung. Unbekannte Produkte durchlaufen weiterhin die Produkterkennung aus v0.2; das Speichern und eine etwaige Startbestandsbuchung sind getrennte bestätigte Schritte.
 
 ## Version 0.3
 
-- Mobile-first Lagerübersicht mit fester Navigation für Start, Suche, Scanner und Lagerorte
+- Mobile-first Lagerübersicht mit fester Navigation für Start, Suche, Scanner, Lagerorte und Kassenbon
 - Artikelkarten für Smartphones, vollwertige Desktopansicht, große Touch-Ziele und Unterstützung des System-Dark-Modes
 - Lokaler ZXing-Kamera-Decoder mit manuellem Barcode-Fallback
 - Lokaler Datenbanktreffer vor externer Produktsuche über Open Food Facts, Open Beauty Facts, Open Pet Food Facts und Open Products Facts
@@ -25,6 +25,20 @@ HA Inventory ist eine lokale, modulare Lagerverwaltung für Home Assistant. Vers
 - Unsichere Wiederholungen nach einem Verbindungsabbruch verwenden denselben gespeicherten Idempotenzschlüssel, damit eine bereits bestätigte Buchung nicht doppelt angewendet wird
 - PWA- und Home-Screen-Optionen sind untersucht und in [docs/PWA-architecture.md](docs/PWA-architecture.md) verglichen. Eine vollständige PWA wird noch nicht ausgeliefert.
 
+## Version 0.4
+
+- Fotoaufnahme direkt aus der iPhone-Kamera oder Auswahl aus der Mediathek; Bild drehen, zuschneiden und im Browser verkleinern
+- Lokale Texterkennung mit Tesseract `deu` + `eng` und Pillow im Home-Assistant-App-Container; keine Cloud-OCR und kein dauerhaftes Speichern des Fotos oder OCR-Volltexts
+- REWE- und Kaufland-orientierte Erkennung von Artikeln, Preisen, Mehrfachmengen, Datum, Summe und Händler; Pfand, Rückgaben, Rabatte, Summen und Zahlungsdaten werden möglichst herausgefiltert
+- Erkannte Positionen bleiben vor dem Import bearbeitbar. Katalogvorschläge und benutzergelernte Händler-Aliase helfen bei der Zuordnung; unbekannte Produkte werden nur nach ausdrücklicher Auswahl angelegt
+- Mengen- und Zuordnungsprüfung, Dublettenhinweis über Bildhash und Bon-Fingerprint sowie ausdrückliche Ausnahmebestätigung bei erneutem Import
+- Sammelimport nur nach Bestätigung; alle Buchungen und neu angelegten Artikel laufen atomar über `StockMovementService`. Idempotenzschlüssel schützen Wiederholungen nach Verbindungsabbrüchen.
+- Gesamter Bon-Import kann als atomare Sammelgegenbuchung rückgängig gemacht werden. Wenn spätere Buchungen ein sicheres Undo verhindern, bleibt der komplette Import unverändert.
+- Additive SQLite-Migration v7 für Bon-Metadaten, Händler-Aliase und Verknüpfungen zum Buchungsverlauf; vorhandene Artikel- und Bewegungs-IDs bleiben erhalten
+- Home-Assistant-Container enthält Tesseract sowie deutsche und englische Sprachdaten für `amd64` und `aarch64`; CI-Smoke prüft tatsächliche OCR mit einem synthetischen Bon
+
+Die Erkennung ist ein Vorschlag. Bonlayouts, Abkürzungen, schlechte Fotos, Aktionspreise und Händler-Varianten können zu fehlenden oder falschen Positionen führen. Jede Zeile und Menge muss vor dem Import geprüft werden. Einzelpreise werden nie als Stückzahl verwendet; wenn die Menge nicht eindeutig erkannt wird, muss sie geprüft werden. Unbekannte oder einfache Bestände benötigen weiterhin eine ausdrückliche Wahl des Bestandsmodells.
+
 Die API-Spezifikation einschließlich Produktsuche befindet sich in [docs/API.md](docs/API.md). Die längerfristige Integrationsarchitektur für Sensoren, Aktionen, Ereignisse und To-do-/Einkaufslisten steht in [docs/architecture.md](docs/architecture.md). In 0.2 ist die eigenständige HA-Integration noch nicht installierbar; sie wartet auf einen sicheren authentifizierten Integrationszugang.
 
 ## ZXing und iPhone-Kamera
@@ -41,15 +55,15 @@ Open Facts nennt ODbL für die Datenbank, eine Database Contents License für ei
 
 ## Installation auf Home Assistant OS
 
-Die Home-Assistant-App unterstützt `aarch64` und `amd64`. Für einen Raspberry Pi 4 ist **Home Assistant OS 64-bit** (`rpi4-64`/`aarch64`) erforderlich. Die nicht unterstützte 32-Bit-Architektur `armv7` ist nicht enthalten. Der Supervisor baut das Image aus der `Dockerfile`; der erste Build auf dem Pi kann einige Minuten dauern. CI baut und startet das Image für AMD64 und ARM64.
+Die Home-Assistant-App unterstützt `aarch64` und `amd64`. Für einen Raspberry Pi 4 ist **Home Assistant OS 64-bit** (`rpi4-64`/`aarch64`) erforderlich. Die nicht unterstützte 32-Bit-Architektur `armv7` ist nicht enthalten. Der Supervisor baut das Image aus der `Dockerfile`; der erste Build auf dem Pi kann wegen Tesseract, Sprachdaten und Pillow einige Minuten dauern. CI baut und startet das Image für AMD64 und ARM64 und prüft lokale OCR.
 
 Das GitHub-Repository ist öffentlich. Der Review-Branch kann im Home-Assistant-App-Store als Repository mit Branch-Suffix hinzugefügt werden:
 
 ```text
-https://github.com/foxifox56/ha-inventory#development/v0.3
+https://github.com/foxifox56/ha-inventory#development/v0.4
 ```
 
-In Home Assistant: **Einstellungen → Apps → Installieren → ⋮ → Repositories**, URL hinzufügen und danach **HA Inventory** aus diesem Repository auswählen. Die offizielle [Home Assistant-Anleitung zu App-Repositories](https://developers.home-assistant.io/docs/apps/guides/repository/) bestätigt `#branch` als Weg, einen anderen Branch als den Standardbranch auszuwählen. `development/v0.3` ist ein Review-Branch und kann sich ändern.
+In Home Assistant: **Einstellungen → Apps → Installieren → ⋮ → Repositories**, URL hinzufügen und danach **HA Inventory** aus diesem Repository auswählen. Die offizielle [Home Assistant-Anleitung zu App-Repositories](https://developers.home-assistant.io/docs/apps/guides/repository/) bestätigt `#branch` als Weg, einen anderen Branch als den Standardbranch auszuwählen. `development/v0.4` ist ein Review-Branch und kann sich ändern.
 
 **Daten und Upgrade:** Vor jedem Upgrade ein vollständiges Home-Assistant-Backup mit App-Daten erstellen und außerhalb des Geräts ablegen. `backup: cold` sichert SQLite bei gestopptem App-Container. Der Supervisor verwendet die Repository-URL einschließlich Branch für die Repository-ID; ein Wechsel von lokaler Installation oder anderem Branch kann daher eine andere App-ID und ein anderes `/data` erzeugen. Die vorhandene Datenbank wird dann nicht automatisch übernommen. Installiere den Review-Branch nicht parallel zu einem produktiven Bestand und kopiere keine laufende SQLite-Datei. Ein Update derselben App-Identität nutzt den vorhandenen App-Datenspeicher; ein Backup-/Restore zwischen unterschiedlichen App-IDs wurde hier nicht auf einem Supervisor geprüft. Vor einem Branch-Wechsel muss der unterstützte Backup-/Restore-Pfad auf einer separaten HA-Testinstanz verifiziert werden. Beim Rollback zuerst die Test-App stoppen und den Restore-Pfad prüfen; die bisherige App nicht entfernen, bevor Daten und Rückkehrweg geprüft sind.
 
@@ -59,14 +73,15 @@ Lokale Entwicklung folgt weiterhin der [offiziellen Anleitung für lokale Apps](
 
 ### Sicherung
 
-Die App nutzt `backup: cold`. Home Assistant stoppt den Container während der Sicherung; die Oberfläche ist in dieser Zeit kurz nicht verfügbar. SQLite und WAL-Dateien werden aus dem gestoppten App-Datenverzeichnis gesichert, sodass keine laufenden Datenbank-Schreibvorgänge parallel stattfinden. Die Datenbank liegt unter `/data/inventory.sqlite3`.
+Die App nutzt `backup: cold`. Home Assistant stoppt den Container während der Sicherung; die Oberfläche ist in dieser Zeit kurz nicht verfügbar. SQLite und WAL-Dateien werden aus dem gestoppten App-Datenverzeichnis gesichert, sodass keine laufenden Datenbank-Schreibvorgänge parallel stattfinden. Die Datenbank liegt unter `/data/inventory.sqlite3`. Bonfotos und OCR-Volltexte liegen nicht in der Datenbank; für erkannte/importierte Bons bleiben nur Hashes, Status, Fingerprint und Buchungsverknüpfungen.
 
 ## Lokal entwickeln
 
-Voraussetzung: Python 3.12 oder neuer und Node.js für die Frontend-Tests. Die Python-Backendtests verwenden nur die Standardbibliothek.
+Voraussetzung: Python 3.12 oder neuer, Node.js für die Frontend-Tests sowie Pillow für die lokale Bildverarbeitung.
 
 ```bash
 cd ha_inventory
+python3 -m pip install -r requirements.txt
 INVENTORY_DATA_DIR=../.local-data INVENTORY_ALLOW_DIRECT_ACCESS=1 python3 -m backend
 ```
 
@@ -89,6 +104,7 @@ node --check frontend/app.js
 node --check frontend/api-client.mjs
 node --check frontend/product-prefill.mjs
 node --check frontend/stock-booking.mjs
+node --check frontend/receipt-flow.mjs
 node --check frontend/vendor/zxing-browser.mjs
 ```
 
@@ -123,4 +139,4 @@ ha_inventory/
 
 ## Branch und Review
 
-Version 0.3 wird auf `development/v0.3` entwickelt und als eigener Pull Request gegen `development/v0.2` zur Überprüfung vorgelegt. Es gibt keinen automatischen Merge nach `main`.
+Version 0.4 wird auf `development/v0.4` entwickelt und als eigener Pull Request gegen `development/v0.3` zur Überprüfung vorgelegt. Es gibt keinen automatischen Merge nach `main`.

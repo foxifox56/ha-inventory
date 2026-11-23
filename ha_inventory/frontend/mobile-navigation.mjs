@@ -1,4 +1,4 @@
-export const MOBILE_VIEWS = Object.freeze(['home', 'search', 'scanner', 'locations']);
+export const MOBILE_VIEWS = Object.freeze(['home', 'search', 'scanner', 'locations', 'receipts']);
 
 export function normalizeLocation(location) {
   const value = String(location ?? '').trim();
