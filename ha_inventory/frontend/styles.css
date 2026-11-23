@@ -164,6 +164,22 @@ footer span { margin: 0 5px; }
 #detail-product-media { margin-top: 12px; }
 .toast { position: fixed; z-index: 10; right: 16px; bottom: calc(84px + env(safe-area-inset-bottom)); left: 16px; max-width: 520px; margin: 0 auto; padding: 13px 16px; border-radius: 13px; color: #fff; background: #282a38; box-shadow: 0 10px 30px #15172330; font-size: 13px; opacity: 0; transform: translateY(8px); pointer-events: none; transition: .18s ease; }
 .toast.visible { opacity: 1; transform: translateY(0); }
+.toast.has-action { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.toast-action { min-height: 38px; flex: 0 0 auto; padding: 7px 12px; border: 1px solid #ffffff66; border-radius: 10px; color: #fff; background: transparent; font-weight: 700; pointer-events: auto; }
+.toast.visible { pointer-events: auto; }
+.detail-dialog .dialog-actions { flex-wrap: wrap; }
+.detail-dialog .dialog-actions .button { flex: 1 1 calc(50% - 8px); }
+.booking-item-name { margin: -5px 0 12px; color: var(--ink); font-size: 16px; font-weight: 700; }
+.initial-stock-fields { padding: 12px; border: 1px solid var(--line); border-radius: 13px; background: var(--soft); }
+.confirm-stock { display: flex; align-items: flex-start; gap: 10px; padding: 8px 2px 2px; color: var(--ink); font-size: 12px; line-height: 1.45; }
+.confirm-stock input { width: 22px; height: 22px; flex: 0 0 auto; accent-color: var(--accent); }
+.history-list { display: grid; gap: 9px; max-height: min(55vh, 520px); overflow-y: auto; }
+.history-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); }
+.history-row-copy { display: grid; gap: 4px; min-width: 0; }
+.history-row-copy strong { color: var(--ink); font-size: 12px; }
+.history-row-copy span, .history-row-copy small, .history-undone, .empty-history { color: var(--muted); font-size: 10px; line-height: 1.4; }
+.history-row .button { min-height: 38px; flex: 0 0 auto; padding: 7px 10px; font-size: 11px; }
+.empty-history { margin: 16px 0 0; text-align: center; }
 
 @media (min-width: 760px) {
   .shell { padding: 0 32px 30px; }

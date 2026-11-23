@@ -9,6 +9,7 @@ from typing import Type
 from .database import Database
 from .inventory.repository import InventoryRepository
 from .inventory.service import InventoryService
+from .inventory.movements import StockMovementService
 from .product_lookup import OpenFactsProvider, ProductLookupService
 from .web.handler import InventoryRequestHandler
 
@@ -22,6 +23,7 @@ def create_handler(
     database = Database(Path(data_dir))
     database.initialize()
     service = InventoryService(InventoryRepository(database))
+    movement_service = StockMovementService(database)
     providers = [OpenFactsProvider()] if product_providers is None else product_providers
     product_lookup = ProductLookupService(service, providers)
 
@@ -32,4 +34,5 @@ def create_handler(
         write_tokens_lock = threading.Lock()
 
     ConfiguredInventoryHandler.product_lookup = product_lookup
+    ConfiguredInventoryHandler.stock_movements = movement_service
     return ConfiguredInventoryHandler

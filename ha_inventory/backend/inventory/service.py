@@ -253,6 +253,24 @@ class InventoryService:
         existing = self.repository.get(item_id)
         if existing is None:
             raise InventoryError("Artikel nicht gefunden.", status_code=404)
+        if "quantity" in payload:
+            requested_quantity = self._quantity(payload["quantity"], "quantity")
+            if requested_quantity != existing["quantity"]:
+                raise InventoryError(
+                    "Mengen dürfen nur über eine Bestandsbuchung geändert werden.",
+                    status_code=409,
+                    field="quantity",
+                )
+        if (
+            payload.get("tracking_mode") == "simple"
+            and existing["tracking_mode"] in {"inventory", "exact"}
+            and existing["quantity"] is not None
+        ):
+            raise InventoryError(
+                "Ein erfasster Zahlenbestand kann nicht durch einen Modellwechsel verworfen werden.",
+                status_code=409,
+                field="tracking_mode",
+            )
         stock_fields = {"tracking_mode", "stock_status", "quantity"}
         if stock_fields.intersection(payload):
             values: dict[str, Any] = self._stock_values(payload, existing)
@@ -286,5 +304,11 @@ class InventoryService:
         return item
 
     def delete(self, item_id: int) -> None:
-        if not self.repository.delete(item_id):
-            raise InventoryError("Artikel nicht gefunden.", status_code=404)
+        try:
+            if not self.repository.delete(item_id):
+                raise InventoryError("Artikel nicht gefunden.", status_code=404)
+        except sqlite3.IntegrityError as error:
+            raise InventoryError(
+                "Artikel mit Buchungsverlauf können nicht gelöscht werden.",
+                status_code=409,
+            ) from error

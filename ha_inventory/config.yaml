@@ -1,8 +1,8 @@
 name: "HA Inventory"
-version: "0.2.0"
+version: "0.3.0"
 slug: "ha-inventory"
 description: "Mobile Lagerverwaltung mit versionierter API und Barcode-Scanner."
-url: "https://github.com/foxifox56/ha-inventory/tree/development/v0.2/ha_inventory"
+url: "https://github.com/foxifox56/ha-inventory/tree/development/v0.3/ha_inventory"
 arch:
   - aarch64
   - amd64

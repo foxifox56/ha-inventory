@@ -53,6 +53,7 @@ def main() -> None:
         assert status == 200, f"Unexpected frontend HTTP status: {status}"
         assert "text/html" in headers.get("Content-Type", "")
         assert b"detail-dialog" in body
+        assert b"Verbrauchen" in body and b"history-dialog" in body
         return
 
     if command == "create":
@@ -73,6 +74,28 @@ def main() -> None:
             {"X-HA-Inventory-Write-Token": token},
         )
         assert status == 201, f"Unexpected create HTTP status: {status}: {body!r}"
+        item_id = json.loads(body)["item"]["id"]
+        movement_payload = {
+            "action": "consume", "quantity": 1,
+            "source": "container-smoke", "idempotency_key": "container-smoke-consume-1",
+        }
+        status, movement_body, _ = request(
+            base_url, f"/api/v1/items/{item_id}/movements", "POST", movement_payload,
+            {"X-HA-Inventory-Write-Token": token},
+        )
+        assert status == 201, f"Unexpected movement HTTP status: {status}: {movement_body!r}"
+        movement_id = json.loads(movement_body)["movement"]["id"]
+        status, replay_body, _ = request(
+            base_url, f"/api/v1/items/{item_id}/movements", "POST", movement_payload,
+            {"X-HA-Inventory-Write-Token": token},
+        )
+        assert status == 200, f"Expected idempotent replay, got HTTP {status}: {replay_body!r}"
+        status, undo_body, _ = request(
+            base_url, f"/api/v1/movements/{movement_id}/undo", "POST",
+            {"idempotency_key": "container-smoke-undo-1", "source": "container-smoke"},
+            {"X-HA-Inventory-Write-Token": token},
+        )
+        assert status == 201, f"Unexpected undo HTTP status: {status}: {undo_body!r}"
         return
 
     if command == "read":
@@ -84,6 +107,12 @@ def main() -> None:
         assert item["name"] == "Container smoke item"
         assert item["quantity"] == 5
         assert item["stock_status"] == "known"
+        status, history_body, _ = request(base_url, f"/api/v1/items/{item['id']}/movements")
+        assert status == 200, f"Unexpected movement history HTTP status: {status}"
+        history = json.loads(history_body)["movements"]
+        assert len(history) == 2, f"Movement history did not survive restart: {history!r}"
+        original = next(entry for entry in history if entry["action"] == "consume")
+        assert original["undone_by_movement_id"] is not None
         return
 
     if command == "denied":

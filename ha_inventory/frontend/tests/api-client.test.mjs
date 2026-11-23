@@ -67,6 +67,53 @@ test('a repeated invalid token is not retried more than once', async () => {
   assert.equal(writes, 2);
 });
 
+test('a scan-mode change during write-session acquisition cancels the mutation before sending', async () => {
+  let sessions = 0;
+  let writes = 0;
+  const client = createApiClient(async (url) => {
+    if (new URL(url).pathname.endsWith('/write-session')) {
+      sessions += 1;
+      return response(200, { write_token: 'write-session' });
+    }
+    writes += 1;
+    return response(201, { movement: { id: 1 } });
+  }, 'https://ha.example/api/v1/');
+
+  await assert.rejects(client.request('items/1/movements', {
+    method: 'POST', body: '{}', beforeSend: () => false,
+  }), (error) => {
+    assert.equal(error.status, 409);
+    assert.equal(error.code, 'mutation_intent_cancelled');
+    return true;
+  });
+  assert.equal(sessions, 1);
+  assert.equal(writes, 0);
+});
+
+test('the mutation preflight is checked again after an expired-session refresh', async () => {
+  let sessions = 0;
+  let writes = 0;
+  let modeIsConfirmed = true;
+  const client = createApiClient(async (url) => {
+    if (new URL(url).pathname.endsWith('/write-session')) {
+      sessions += 1;
+      return response(200, { write_token: `token-${sessions}` });
+    }
+    writes += 1;
+    modeIsConfirmed = false;
+    return response(403, { code: 'write_session_invalid', error: 'expired' });
+  }, 'https://ha.example/api/v1/');
+
+  await assert.rejects(client.request('items/1/movements', {
+    method: 'POST', body: '{}', beforeSend: () => modeIsConfirmed,
+  }), (error) => {
+    assert.equal(error.code, 'mutation_intent_cancelled');
+    return true;
+  });
+  assert.equal(sessions, 2);
+  assert.equal(writes, 1);
+});
+
 test('rate-limit retry guidance is carried to the lookup flow', async () => {
   const client = createApiClient(async () => response(429, {
     code: 'product_lookup_rate_limited',

@@ -85,7 +85,7 @@ class ProductLookupProviderTests(unittest.TestCase):
             "https://world.openfoodfacts.org/api/v3/product/00012345.json?product_type=all"
         ))
         self.assertIn("generate_images_urls=true", request.full_url)
-        self.assertIn("HA-Inventory/0.2", request.get_header("User-agent"))
+        self.assertIn("HA-Inventory/0.3", request.get_header("User-agent"))
         self.assertEqual(timeout, 5)
         self.assertEqual(candidate.barcode, "00012345")
         self.assertEqual(candidate.name, "Haferdrink")

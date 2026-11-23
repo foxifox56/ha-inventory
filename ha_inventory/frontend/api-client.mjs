@@ -23,10 +23,18 @@ export function createApiClient(fetchImpl, apiBaseUrl) {
   async function request(path, options = {}, refreshedWriteSession = false) {
     const method = (options.method || 'GET').toUpperCase();
     const isMutation = !['GET', 'HEAD', 'OPTIONS'].includes(method);
+    const { beforeSend, ...fetchOptions } = options;
     if (isMutation && !writeToken) await acquireWriteSession();
 
+    if (isMutation && typeof beforeSend === 'function' && !beforeSend()) {
+      const error = new Error('Der Scan-Modus hat sich geändert; die Buchung wurde abgebrochen.');
+      error.status = 409;
+      error.code = 'mutation_intent_cancelled';
+      throw error;
+    }
+
     const response = await fetchImpl(new URL(path, apiBaseUrl), {
-      ...options,
+      ...fetchOptions,
       headers: {
         'Content-Type': 'application/json',
         ...(isMutation && writeToken

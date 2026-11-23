@@ -4,10 +4,12 @@ on:
   push:
     branches:
       - development/v0.2
+      - development/v0.3
   pull_request:
     branches:
       - main
       - development/v0.1
+      - development/v0.2
 
 permissions:
   contents: read
@@ -51,6 +53,7 @@ jobs:
           node --check frontend/api-client.mjs
           node --check frontend/mobile-navigation.mjs
           node --check frontend/zxing-scanner.mjs
+          node --check frontend/stock-booking.mjs
           node --check frontend/vendor/zxing-browser.mjs
 
       - name: Build and smoke-test AMD64 container

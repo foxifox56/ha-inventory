@@ -16,7 +16,7 @@ HA Inventory öffnet keinen Host-Port und fügt keine zweite Cloud-Datenbank ein
 
 ## Barcode-Scanner
 
-Version 0.2 vendort `@zxing/browser` 0.2.1 lokal in der App, anstatt ein CDN zur Laufzeit aufzurufen. Beim Antippen des Scanners fordert der Browser Zugriff auf die nach hinten gerichtete Kamera an. Die Browser-API benötigt einen sicheren Kontext (normalerweise HTTPS) und eine erteilte Kameraberechtigung. ZXing dokumentiert, dass iOS vor 14.3 Kamera-WebRTC nur in Safari bereitstellt; neuere iOS-Versionen unterstützen WebRTC auch in Drittanbieter-Browsern. Das ist keine Garantie, dass jeder Ingress-/Nabu-Casa-/iOS-Kontext funktioniert. Die manuelle Eingabe sowie Tastatur-Scanner bleiben verfügbar.
+Version 0.3 vendort `@zxing/browser` 0.2.1 lokal in der App, anstatt ein CDN zur Laufzeit aufzurufen. Beim Antippen des Scanners fordert der Browser Zugriff auf die nach hinten gerichtete Kamera an. Die Browser-API benötigt einen sicheren Kontext (normalerweise HTTPS) und eine erteilte Kameraberechtigung. ZXing dokumentiert, dass iOS vor 14.3 Kamera-WebRTC nur in Safari bereitstellt; neuere iOS-Versionen unterstützen WebRTC auch in Drittanbieter-Browsern. Das ist keine Garantie, dass jeder Ingress-/Nabu-Casa-/iOS-Kontext funktioniert. Die manuelle Eingabe sowie Tastatur-Scanner bleiben verfügbar.
 
 Ein bekannter Barcode öffnet die Details. Bei unbekannten Codes versucht das Backend über ausgehendes HTTPS die Produktdatenquelle Open Facts und füllt danach das editierbare Artikelformular vor. Wenn die Quelle offline ist oder keinen Treffer hat, bleibt das normale Formular mit Barcode verfügbar. Scans führen weder eine Artikelerstellung noch eine Bestandsänderung aus.
 

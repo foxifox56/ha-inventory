@@ -99,7 +99,7 @@
         </button>
       </nav>
 
-      <footer>HA Inventory <span>·</span> Version 0.2 <span>·</span> Deine Daten bleiben bei dir</footer>
+      <footer>HA Inventory <span>·</span> Version 0.3 <span>·</span> Deine Daten bleiben bei dir</footer>
     </div>
 
     <dialog id="item-dialog" class="dialog">
@@ -148,6 +148,7 @@
               <option value="exact">Exakter Bestand · manuell gezählt</option>
             </select>
           </label>
+          <p id="create-stock-note" class="camera-status full-field" hidden>Der Artikel wird zuerst gespeichert. Im nächsten Schritt bestätigst du die erste Einlagerung als Startbestand, damit sie im Buchungsverlauf erscheint.</p>
           <label class="field full-field" id="simple-stock-field">Status
             <select id="item-stock-status" name="stock_status">
               <option value="unknown">Bestand unbekannt</option>
@@ -166,6 +167,7 @@
               <input id="item-minimum" name="minimum_quantity" type="number" min="0" step="any" value="0" />
             </label>
           </div>
+          <p id="saved-stock-note" class="camera-status full-field" hidden>Bei gespeicherten Artikeln änderst du den Bestand über Einlagern oder Verbrauchen, damit der Vorgang im Verlauf bleibt.</p>
           <label class="field full-field">Notiz <span class="optional">optional</span>
             <textarea id="item-notes" name="notes" maxlength="1000" rows="2" placeholder="Zusätzliche Infos …"></textarea>
           </label>
@@ -200,8 +202,48 @@
       <p class="detail-footnote">Der Scan hat den Bestand nicht verändert.</p>
       <div class="dialog-actions">
         <button class="button button-quiet" id="close-detail-button" type="button">Schließen</button>
+        <button class="button button-quiet" id="detail-history-button" type="button">Buchungsverlauf</button>
+        <button class="button button-quiet" id="detail-book-button" type="button">Einlagern / Verbrauchen</button>
         <button class="button button-primary" id="detail-edit-button" type="button">Artikel bearbeiten</button>
       </div>
+    </dialog>
+
+    <dialog id="booking-dialog" class="dialog">
+      <form id="booking-form" method="dialog">
+        <div class="dialog-heading">
+          <div><p class="eyebrow">BESTAND BUCHEN</p><h2 id="booking-title">Einlagern</h2></div>
+          <button class="icon-button" id="close-booking-dialog" type="button" aria-label="Schließen">×</button>
+        </div>
+        <p id="booking-item-name" class="booking-item-name"></p>
+        <p id="booking-stock-note" class="camera-status" role="status"></p>
+        <label class="field full-field">Anzahl Packungen
+          <input id="booking-quantity" type="number" min="1" step="1" inputmode="numeric" value="1" required />
+        </label>
+        <div id="initial-stock-fields" class="initial-stock-fields" hidden>
+          <label class="field full-field">Bestandsmodell
+            <select id="initial-tracking-mode">
+              <option value="exact">Exakter Bestand</option>
+              <option value="inventory">Geschätzter Bestand</option>
+            </select>
+          </label>
+          <label class="confirm-stock"><input id="confirm-initial-stock" type="checkbox" /> Ich bestätige diesen Startbestand ausdrücklich.</label>
+        </div>
+        <p class="form-error" id="booking-error" role="alert" hidden></p>
+        <div class="dialog-actions">
+          <button class="button button-quiet" id="cancel-booking" type="button">Abbrechen</button>
+          <button class="button button-primary" id="booking-submit" type="submit">Einlagern bestätigen</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="history-dialog" class="dialog history-dialog">
+      <div class="dialog-heading">
+        <div><p class="eyebrow">ÄNDERUNGEN NACHVOLLZIEHEN</p><h2 id="history-title">Buchungsverlauf</h2></div>
+        <button class="icon-button" id="close-history-dialog" type="button" aria-label="Schließen">×</button>
+      </div>
+      <div id="history-list" class="history-list" aria-live="polite"></div>
+      <p id="history-empty" class="empty-history" hidden>Noch keine Bestandsbuchungen.</p>
+      <div class="dialog-actions"><button class="button button-quiet" id="history-close-button" type="button">Schließen</button></div>
     </dialog>
 
     <dialog id="scan-dialog" class="dialog scan-dialog">
@@ -209,13 +251,24 @@
         <div><p class="eyebrow">SCHNELLER ZUGRIFF</p><h2>Barcode scannen</h2></div>
         <button class="icon-button" id="close-scan-dialog" type="button" aria-label="Schließen">×</button>
       </div>
-      <p class="scan-copy">Ein bekannter Code öffnet den Artikel. Bei unbekannten Codes suchen wir passende Produktdaten und füllen das Formular vor. Nichts wird ohne „Artikel speichern“ angelegt oder am Bestand verändert.</p>
+      <p class="scan-copy">Ansehen: öffnet bekannte Artikel nur lesend. Einlagern: wähle die Menge und bestätige die Buchung; erst danach steigt der Bestand. Verbrauchen: ein Scan eines bekannten Artikels bucht die gewählte Menge sofort ab – standardmäßig 1 Einheit, ohne weitere Bestätigung. Du kannst die Buchung im Verlauf rückgängig machen. Bei unbekannten numerischen Codes können Produktdaten das Formular vorausfüllen; Speichern bleibt manuell. Unbekannte Codes werden nicht automatisch gespeichert oder gebucht.</p>
       <p class="camera-limitation">Die Kamera nutzt ZXing im Browser und benötigt eine sichere HTTPS-Verbindung. iOS/Safari-Kameraerkennung hängt von iOS-Version, Berechtigungen und Browserkontext ab. Manuelle Eingabe bleibt verfügbar.</p>
+      <label class="field full-field">Scan-Modus
+        <select id="scan-mode">
+          <option value="view">Ansehen · Bestand bleibt unverändert</option>
+          <option value="receive">Einlagern · bestätigen</option>
+          <option value="consume">Verbrauchen · sofort buchen</option>
+        </select>
+      </label>
+      <label class="field full-field scan-quantity-field" id="scan-quantity-field" hidden>Packungen je Scan
+        <input id="scan-quantity" type="number" min="1" step="1" inputmode="numeric" value="1" />
+      </label>
       <div class="camera-wrap" id="camera-wrap" hidden>
         <video id="camera-video" playsinline muted></video>
         <span class="scan-frame" aria-hidden="true"></span>
       </div>
       <p class="camera-status" id="camera-status" role="status" aria-live="polite" aria-atomic="true" hidden></p>
+      <button class="button button-quiet full-field" id="retry-scan-booking" type="button" hidden>Sicher abgleichen</button>
       <button class="button button-quiet camera-button" id="camera-button" type="button" hidden>Kamera öffnen</button>
       <label class="field full-field scan-field">Barcode eingeben oder Scanner verwenden
         <div class="scan-input-row">

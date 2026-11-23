@@ -14,6 +14,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from ..errors import InventoryError
 from ..inventory.service import InventoryService
+from ..inventory.movements import StockMovementService
 from ..product_lookup.provider import ProductLookupError, ProductLookupRateLimited
 
 
@@ -40,7 +41,8 @@ class InventoryRequestHandler(BaseHTTPRequestHandler):
     require_ingress_proxy = True
     write_tokens: dict[str, float] = {}
     write_tokens_lock = threading.Lock()
-    server_version = "HAInventory/0.2"
+    server_version = "HAInventory/0.3"
+    stock_movements: StockMovementService
 
     def do_GET(self) -> None:
         if not self._allow_request():
@@ -56,7 +58,33 @@ class InventoryRequestHandler(BaseHTTPRequestHandler):
             return
         path = urlsplit(self.path).path
         if path not in {"/api/items", "/api/v1/items"}:
-            self._json_response(404, {"error": "Route nicht gefunden."})
+            movement_parts = path.split("/")
+            movement_route = (
+                len(movement_parts) == 6 and movement_parts[1:3] == ["api", "v1"]
+                and movement_parts[3] == "items" and movement_parts[5] == "movements"
+                and movement_parts[4].isdecimal() and int(movement_parts[4]) > 0
+            )
+            undo_route = (
+                len(movement_parts) == 6 and movement_parts[1:3] == ["api", "v1"]
+                and movement_parts[3] == "movements" and movement_parts[5] == "undo"
+                and movement_parts[4].isdecimal() and int(movement_parts[4]) > 0
+            )
+            if not movement_route and not undo_route:
+                self._json_response(404, {"error": "Route nicht gefunden."})
+                return
+            if not self._allow_write():
+                return
+            try:
+                payload = self._read_json()
+                if movement_route:
+                    movement = self.stock_movements.book(int(movement_parts[4]), payload)
+                    status = 200 if movement.pop("replayed", False) else 201
+                else:
+                    movement = self.stock_movements.undo(int(movement_parts[4]), payload)
+                    status = 200 if movement.pop("replayed", False) else 201
+                self._json_response(status, {"movement": movement})
+            except InventoryError as error:
+                self._inventory_error(error)
             return
         if not self._allow_write():
             return
@@ -154,6 +182,15 @@ class InventoryRequestHandler(BaseHTTPRequestHandler):
             )
             self._json_response(200, {"items": items})
             return
+        if api_root == "/api/v1/" and api_path.endswith("/movements"):
+            parts = api_path.split("/")
+            if len(parts) == 4 and parts[1] == "items" and parts[2].isdecimal() and int(parts[2]) > 0:
+                try:
+                    movements = self.stock_movements.list_for_item(int(parts[2]))
+                    self._json_response(200, {"movements": movements})
+                except InventoryError as error:
+                    self._inventory_error(error)
+                return
         if api_root == "/api/v1/" and api_path == "/categories":
             items = self.inventory.list_items()
             categories = sorted({item["category"] for item in items}, key=str.casefold)
