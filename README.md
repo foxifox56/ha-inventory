@@ -25,7 +25,7 @@ Die App unterstützt Home Assistant OS auf einem Raspberry Pi 4 mit **64-Bit-HA 
 ### Lokaler Test nach der Überprüfung
 
 1. Lade die geprüfte Branch als ZIP herunter und entpacke sie.
-2. Öffne auf Home Assistant OS die Samba-Freigabe **`local_apps`** oder im Terminal-&-SSH-Add-on den Pfad **`/local_apps`**.
+2. Öffne die Samba-Freigabe von Home Assistant OS und darin den Ordner **`local_apps`**; im Terminal-&-SSH-Add-on erreichst du ihn unter **`/local_apps`**.
 3. Lege dort **`ha_inventory`** an und kopiere den Inhalt des gleichnamigen Projektordners hinein. Danach muss zum Beispiel `local_apps/ha_inventory/config.yaml` direkt vorhanden sein.
 4. Öffne in Home Assistant **Einstellungen → Apps**, wähle im Menü **Nach Updates suchen** und aktualisiere die Ansicht.
 5. Installiere **HA Inventory** aus dem Bereich **Local apps**, starte die App und öffne ihre Web-Oberfläche.

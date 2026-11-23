@@ -2,7 +2,7 @@
 
 ## Installation auf Home Assistant OS
 
-Das GitHub-Repository ist derzeit privat und kann nicht über die normale Repository-URL im App Store bezogen werden. Für einen lokalen Test nach der Überprüfung kopiere den Inhalt dieses App-Ordners in den Ordner `ha_inventory` innerhalb der **`local_apps`-Freigabe** auf Home Assistant OS. Über Terminal & SSH ist das `/local_apps/ha_inventory/`; danach muss `config.yaml` direkt in diesem Ordner liegen. Die aktuelle [Home-Assistant-Anleitung für lokale Apps](https://developers.home-assistant.io/docs/apps/testing/) beschreibt diesen `local_apps`-Pfad.
+Das GitHub-Repository ist derzeit privat und kann nicht über die normale Repository-URL im App Store bezogen werden. Für einen lokalen Test nach der Überprüfung kopiere den Inhalt dieses App-Ordners in `local_apps/ha_inventory/` in der Samba-Freigabe von Home Assistant OS. Über Terminal & SSH ist das `/local_apps/ha_inventory/`; danach muss `config.yaml` direkt in diesem Ordner liegen. Die aktuelle [Home-Assistant-Anleitung für lokale Apps](https://developers.home-assistant.io/docs/apps/testing/) beschreibt diesen `local_apps`-Pfad.
 
 `/addons` kann in älteren Konfigurationen als veralteter Alias bzw. als Container-Mount für `local_apps` auftauchen. Für die lokale Bereitstellung auf dem Host ist der aktuelle Ordner `local_apps` beziehungsweise `/local_apps`.
 
